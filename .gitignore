@@ -1,0 +1,14 @@
+/target
+# Portable executables (scripts/build-portable.ps1)
+/exe/
+# Recordings, captures, decoded audio, received pictures: never committed.
+/samples/
+/out/
+/rx/
+*.wav
+*.flac
+# Reference clones live outside the repo: ..\easydrf-ref, ..\qsstv-ref, ..\DecDRM
+/reference/
+.vscode/
+.idea/
+Thumbs.db

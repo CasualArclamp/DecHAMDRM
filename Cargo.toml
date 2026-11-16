@@ -1,0 +1,29 @@
+[workspace]
+resolver = "3"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-or-later"
+repository = "https://github.com/CasualArclamp/DecHAMDRM"
+rust-version = "1.95"
+
+[workspace.dependencies]
+# Generic DRM FEC/DSP pieces (conv code, puncturing, Viterbi, QAM metrics, bit and cell
+# interleavers, CRC, channel simulator) come from our DRM30 receiver.
+decdrm-core = { git = "https://github.com/CasualArclamp/DecDRM", tag = "v0.7.1" }
+num-complex = "0.4.6"
+rustfft = "6.4"
+thiserror = "2"
+anyhow = "1"
+
+# DSP is unusably slow unoptimised (same tradeoff as DecDRM).
+[profile.dev]
+opt-level = 1
+
+[profile.dev.package."*"]
+opt-level = 3
+
+[profile.release]
+debug = "line-tables-only"
