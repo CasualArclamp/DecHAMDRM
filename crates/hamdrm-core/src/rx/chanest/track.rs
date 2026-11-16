@@ -18,10 +18,10 @@
 //! measurement window (otherwise the loop lags and overshoots).
 
 use crate::cellmap::CellMap;
-use decdrm_core::dsp::fft::Fft;
-use decdrm_core::dsp::{hamming, iir1_lambda};
 use crate::params::SAMPLE_RATE;
 use crate::{Cplx, Real};
+use decdrm_core::dsp::fft::Fft;
+use decdrm_core::dsp::{hamming, iir1_lambda};
 use std::collections::VecDeque;
 
 const TICONST_PDS: Real = 0.25;
@@ -270,7 +270,8 @@ impl PdsTracker {
                         &mut self.spec_a,
                         &mut self.spec_b,
                     );
-                    self.drift.push_back((s + frame_pos - *prev_pos, self.applied_hz));
+                    self.drift
+                        .push_back((s + frame_pos - *prev_pos, self.applied_hz));
                     if self.drift.len() > self.drift_max {
                         self.drift.pop_front();
                     }
@@ -287,8 +288,9 @@ impl PdsTracker {
         let mut sorted = self.rotated.clone();
         sorted.sort_by(|a, b| a.total_cmp(b));
         let k = NUM_SAM_IR_FOR_MIN_STAT.min(p);
-        let sigma_noise =
-            sorted[..k.saturating_sub(1)].iter().sum::<Real>() / NUM_SAM_IR_FOR_MIN_STAT as Real * OVER_EST_FACT_MIN_STAT;
+        let sigma_noise = sorted[..k.saturating_sub(1)].iter().sum::<Real>()
+            / NUM_SAM_IR_FOR_MIN_STAT as Real
+            * OVER_EST_FACT_MIN_STAT;
         let sig_bound = (tot - sigma_noise * p as Real).max(0.0);
         let mut end = (p - 1) as Real;
         let mut acc = 0.0;
@@ -379,7 +381,11 @@ impl PdsTracker {
         let m = median(&steps);
         let dev: Vec<Real> = steps.iter().map(|v| (v - m).abs()).collect();
         let lim = 4.0 * median(&dev).max(1e-3);
-        let rate = steps.iter().map(|v| v.clamp(m - lim, m + lim)).sum::<Real>() / (n as Real * step_syms);
+        let rate = steps
+            .iter()
+            .map(|v| v.clamp(m - lim, m + lim))
+            .sum::<Real>()
+            / (n as Real * step_syms);
         let mean_applied = self.drift.iter().map(|d| d.1).sum::<Real>() / n as Real;
         let residual = -self.sam_off_hz(rate) - (self.applied_hz - mean_applied);
         let delta = residual * SRO_TRACK_RATE * step_syms / self.sym_rate;
@@ -416,7 +422,11 @@ fn median(v: &[Real]) -> Real {
     let mut s = v.to_vec();
     s.sort_by(Real::total_cmp);
     let n = s.len();
-    if n % 2 == 1 { s[n / 2] } else { 0.5 * (s[n / 2 - 1] + s[n / 2]) }
+    if n % 2 == 1 {
+        s[n / 2]
+    } else {
+        0.5 * (s[n / 2 - 1] + s[n / 2])
+    }
 }
 
 /// Shift `s` (IR bins, with sub-bin precision) that best aligns `cur` with `prev`,
@@ -436,7 +446,14 @@ fn median(v: &[Real]) -> Real {
 /// resolved paths does not, so the phase estimate is used when its fit residual is
 /// small and the parabola otherwise. (Paths closer than the lobe width cannot be told
 /// from a translation by any estimator; the median over many steps handles them.)
-fn profile_shift(prev: &[Real], cur: &[Real], max: usize, fft: &mut Fft, a: &mut Vec<Cplx>, b: &mut Vec<Cplx>) -> Real {
+fn profile_shift(
+    prev: &[Real],
+    cur: &[Real],
+    max: usize,
+    fft: &mut Fft,
+    a: &mut Vec<Cplx>,
+    b: &mut Vec<Cplx>,
+) -> Real {
     /// Largest weighted RMS phase residual (rad) of a translation.
     const MAX_PHASE_RESIDUAL: Real = 0.04;
     let n = prev.len();
@@ -447,13 +464,23 @@ fn profile_shift(prev: &[Real], cur: &[Real], max: usize, fft: &mut Fft, a: &mut
     let (mp, mc) = (mean(prev), mean(cur));
     let m = max.min(n / 2 - 2) as isize;
     let at = |i: usize, s: isize| cur[(i as isize + s).rem_euclid(n as isize) as usize];
-    let corr = |s: isize| (0..n).map(|i| (prev[i] - mp) * (at(i, s) - mc)).sum::<Real>();
-    let Some(k0) = (-m..=m).max_by(|&x, &y| corr(x).total_cmp(&corr(y))) else { return 0.0 };
+    let corr = |s: isize| {
+        (0..n)
+            .map(|i| (prev[i] - mp) * (at(i, s) - mc))
+            .sum::<Real>()
+    };
+    let Some(k0) = (-m..=m).max_by(|&x, &y| corr(x).total_cmp(&corr(y))) else {
+        return 0.0;
+    };
 
     // Parabola through the correlation peak.
     let (y0, y1, y2) = (corr(k0 - 1), corr(k0), corr(k0 + 1));
     let den = y0 - 2.0 * y1 + y2;
-    let parabola = if den < 0.0 { (0.5 * (y0 - y2) / den).clamp(-0.5, 0.5) } else { 0.0 };
+    let parabola = if den < 0.0 {
+        (0.5 * (y0 - y2) / den).clamp(-0.5, 0.5)
+    } else {
+        0.0
+    };
 
     // Phase slope of the cross-spectrum, with `cur` moved back by the integer part.
     a.clear();
@@ -483,7 +510,12 @@ fn profile_shift(prev: &[Real], cur: &[Real], max: usize, fft: &mut Fft, a: &mut
         .sum::<Real>()
         / wsum;
     let phase = (-slope * n as Real / (2.0 * std::f64::consts::PI)).clamp(-1.0, 1.0);
-    k0 as Real + if resid2.sqrt() < MAX_PHASE_RESIDUAL { phase } else { parabola }
+    k0 as Real
+        + if resid2.sqrt() < MAX_PHASE_RESIDUAL {
+            phase
+        } else {
+            parabola
+        }
 }
 
 #[cfg(test)]
@@ -499,7 +531,9 @@ mod tests {
             .map(|k| {
                 let h: Cplx = paths
                     .iter()
-                    .map(|&(d, a)| Cplx::from_polar(a, -2.0 * std::f64::consts::PI * k as Real * d / n as Real))
+                    .map(|&(d, a)| {
+                        Cplx::from_polar(a, -2.0 * std::f64::consts::PI * k as Real * d / n as Real)
+                    })
                     .sum();
                 h * w[k]
             })
@@ -518,10 +552,16 @@ mod tests {
         for base in [10.0, 10.3, 10.5] {
             for true_shift in [-2.3, -0.4, -0.02, 0.0, 0.01, 0.05, 0.15, 1.7] {
                 let prev = ir_profile(104, &[(base, 1.0), (base + 6.0, 0.5)]);
-                let cur = ir_profile(104, &[(base + true_shift, 1.0), (base + 6.0 + true_shift, 0.5)]);
+                let cur = ir_profile(
+                    104,
+                    &[(base + true_shift, 1.0), (base + 6.0 + true_shift, 0.5)],
+                );
                 let s = shift(&prev, &cur);
                 let tol = 0.003 + 0.03 * true_shift.abs();
-                assert!((s - true_shift).abs() < tol, "base {base} shift {true_shift}: measured {s}");
+                assert!(
+                    (s - true_shift).abs() < tol,
+                    "base {base} shift {true_shift}: measured {s}"
+                );
             }
         }
     }

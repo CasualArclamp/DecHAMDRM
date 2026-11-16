@@ -29,7 +29,12 @@ impl BsrRequest {
     /// always does; EasyPal's DLL only in "fast" mode). The `-99` terminator is added
     /// as QSSTV does; EasyDRF ignores what follows it.
     pub fn encode(&self, compress: bool) -> Vec<u8> {
-        let mut s = format!("{}\n{}\n{}\n", self.tid, if self.header_ok { "H_OK" } else { "H_NO" }, self.segment_size);
+        let mut s = format!(
+            "{}\n{}\n{}\n",
+            self.tid,
+            if self.header_ok { "H_OK" } else { "H_NO" },
+            self.segment_size
+        );
         let m = &self.missing;
         let mut i = 0;
         while i < m.len() {
@@ -87,13 +92,21 @@ impl BsrRequest {
         }
         missing.sort_unstable();
         missing.dedup();
-        Some(Self { tid, header_ok, segment_size, missing })
+        Some(Self {
+            tid,
+            header_ok,
+            segment_size,
+            missing,
+        })
     }
 }
 
 /// Extra copies of a repair transmission for short lists (EasyDRF `bsr.cpp:280-294`).
 pub fn repair_copies(instances: usize, segments: usize) -> usize {
-    instances + usize::from(segments <= 50) + usize::from(segments <= 10) + usize::from(segments <= 3)
+    instances
+        + usize::from(segments <= 50)
+        + usize::from(segments <= 10)
+        + usize::from(segments <= 3)
 }
 
 #[cfg(test)]
@@ -102,7 +115,12 @@ mod tests {
 
     #[test]
     fn both_forms_roundtrip() {
-        let r = BsrRequest { tid: 41234, header_ok: true, segment_size: 116, missing: vec![1, 2, 3, 4, 7, 9, 10, 20, 21, 22] };
+        let r = BsrRequest {
+            tid: 41234,
+            header_ok: true,
+            segment_size: 116,
+            missing: vec![1, 2, 3, 4, 7, 9, 10, 20, 21, 22],
+        };
         for c in [false, true] {
             assert_eq!(BsrRequest::decode(&r.encode(c)), Some(r.clone()));
         }

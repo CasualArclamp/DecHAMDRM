@@ -7,7 +7,9 @@
 mod tx;
 mod waterfall;
 
-pub use decdsss_rig::{Config as PttConfig, Method as PttMethod, Model as RigModel, Status as PttStatus};
+pub use decdsss_rig::{
+    Config as PttConfig, Method as PttMethod, Model as RigModel, Status as PttStatus,
+};
 pub use hamdrm_core::params::{Bandwidth, Interleave, Layout, Mode, MscConfig, Qam};
 pub use hamdrm_core::rx::{ReceiverConfig, RxState, RxStatus};
 pub use hamdrm_data::bsr::BsrRequest;
@@ -160,13 +162,20 @@ pub struct Engine {
 impl Engine {
     pub fn start(opts: Options) -> Self {
         let (tx, rx) = channel();
-        let view = Arc::new(Mutex::new(View { waterfall_bin_hz: waterfall::BIN_HZ, ..Default::default() }));
+        let view = Arc::new(Mutex::new(View {
+            waterfall_bin_hz: waterfall::BIN_HZ,
+            ..Default::default()
+        }));
         let v = view.clone();
         let handle = std::thread::Builder::new()
             .name("hamdrm-engine".into())
             .spawn(move || Worker::new(opts, v, rx).run())
             .expect("spawn engine thread");
-        Self { tx, view, handle: Some(handle) }
+        Self {
+            tx,
+            view,
+            handle: Some(handle),
+        }
     }
 
     pub fn send(&self, c: Command) {
@@ -190,7 +199,12 @@ impl Drop for Engine {
 
 enum Source {
     Sound(InputStream),
-    File { samples: Vec<f32>, pos: usize, speed: f64, started: Instant },
+    File {
+        samples: Vec<f32>,
+        pos: usize,
+        speed: f64,
+        started: Instant,
+    },
     None,
 }
 
@@ -267,7 +281,12 @@ impl Worker {
         let mut err = None;
         match &input {
             Input::Sound(dev) => {
-                let o = InputOptions { device: dev.clone(), sample_rate: Some(RATE), channels: Some(1), ..Default::default() };
+                let o = InputOptions {
+                    device: dev.clone(),
+                    sample_rate: Some(RATE),
+                    channels: Some(1),
+                    ..Default::default()
+                };
                 match InputStream::open(&o) {
                     Ok(s) if s.format().sample_rate == RATE => {
                         let n = s.device_name().to_string();
@@ -275,7 +294,13 @@ impl Worker {
                         self.set_names(Some(n), None);
                         self.source = Source::Sound(s);
                     }
-                    Ok(s) => err = Some(format!("{} runs at {} Hz; 48 kHz needed", s.device_name(), s.format().sample_rate)),
+                    Ok(s) => {
+                        err = Some(format!(
+                            "{} runs at {} Hz; 48 kHz needed",
+                            s.device_name(),
+                            s.format().sample_rate
+                        ))
+                    }
                     Err(e) => err = Some(format!("input: {e}")),
                 }
             }
@@ -283,7 +308,12 @@ impl Worker {
                 Ok(samples) => {
                     self.log(format!("input: {}", path.display()));
                     self.set_names(Some(path.display().to_string()), None);
-                    self.source = Source::File { samples, pos: 0, speed: *speed, started: Instant::now() };
+                    self.source = Source::File {
+                        samples,
+                        pos: 0,
+                        speed: *speed,
+                        started: Instant::now(),
+                    };
                 }
                 Err(e) => err = Some(e),
             },
@@ -292,7 +322,10 @@ impl Worker {
         if let Some(e) = &err {
             self.log(e.clone());
         }
-        self.view.lock().unwrap_or_else(|e| e.into_inner()).input_error = err;
+        self.view
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .input_error = err;
         self.rx.restart();
         self.opts.input = input;
     }
@@ -330,7 +363,11 @@ impl Worker {
                 true
             }
             Ok(s) => {
-                self.log(format!("output {} runs at {} Hz; 48 kHz needed", s.device_name(), s.format().sample_rate));
+                self.log(format!(
+                    "output {} runs at {} Hz; 48 kHz needed",
+                    s.device_name(),
+                    s.format().sample_rate
+                ));
                 false
             }
             Err(e) => {
@@ -358,7 +395,8 @@ impl Worker {
     }
 
     fn command(&mut self, c: Command) {
-        if let Command::SendFiles(_, s) | Command::SendBsr(_, s) | Command::SendWaterfall(_, s) = &c {
+        if let Command::SendFiles(_, s) | Command::SendBsr(_, s) | Command::SendWaterfall(_, s) = &c
+        {
             self.last_settings = s.clone();
         }
         match c {
@@ -375,10 +413,17 @@ impl Worker {
                 }
                 for (name, data) in &files {
                     let obj = hamdrm_data::send::object_for(
-                        &hamdrm_data::send::OutFile { name: name.clone(), data: data.clone() },
+                        &hamdrm_data::send::OutFile {
+                            name: name.clone(),
+                            data: data.clone(),
+                        },
                         s.rs,
                     );
-                    self.sent.push_back(Sent { name: name.clone(), data: data.clone(), tid: obj.tid });
+                    self.sent.push_back(Sent {
+                        name: name.clone(),
+                        data: data.clone(),
+                        tid: obj.tid,
+                    });
                     while self.sent.len() > 6 {
                         self.sent.pop_front();
                     }
@@ -400,7 +445,10 @@ impl Worker {
                     let job = TxJob::repair(&sent.name, &sent.data, &req, &s);
                     self.start_job(job, what);
                 } else {
-                    self.log(format!("BSR for transport {} is not about our files", req.tid));
+                    self.log(format!(
+                        "BSR for transport {} is not about our files",
+                        req.tid
+                    ));
                 }
             }
             Command::SendWaterfall(text, s) => {
@@ -490,10 +538,15 @@ impl Worker {
                     let _ = o.write(&block);
                 }
                 // No output: pace the waterfall at real time.
-                None => std::thread::sleep(Duration::from_secs_f64(block.len() as f64 / f64::from(RATE))),
+                None => std::thread::sleep(Duration::from_secs_f64(
+                    block.len() as f64 / f64::from(RATE),
+                )),
             }
         } else if job.finished() {
-            let drained = self.output.as_mut().is_none_or(|o| o.drain(Duration::from_millis(20)));
+            let drained = self
+                .output
+                .as_mut()
+                .is_none_or(|o| o.drain(Duration::from_millis(20)));
             if drained {
                 let j = self.job.take().expect("job");
                 self.log(format!("TX done: {}", j.label()));
@@ -513,7 +566,12 @@ impl Worker {
                 }
                 s.read(4800)
             }
-            Source::File { samples, pos, speed, started } => {
+            Source::File {
+                samples,
+                pos,
+                speed,
+                started,
+            } => {
                 if *pos >= samples.len() {
                     self.view.lock().unwrap_or_else(|e| e.into_inner()).eof = true;
                     std::thread::sleep(Duration::from_millis(20));
@@ -536,7 +594,11 @@ impl Worker {
                 return;
             }
         };
-        let p = block.iter().map(|v| f64::from(*v) * f64::from(*v)).sum::<f64>() / block.len().max(1) as f64;
+        let p = block
+            .iter()
+            .map(|v| f64::from(*v) * f64::from(*v))
+            .sum::<f64>()
+            / block.len().max(1) as f64;
         self.input_db = 10.0 * (p + 1e-12).log10();
         self.wf.push(&block, &mut self.new_rows);
         for ev in self.rx.push(&block) {
@@ -586,14 +648,24 @@ impl Worker {
                 }
             }
             FileEvent::Bsr(req) => {
-                let ours = self.sent.iter().find(|s| s.tid == req.tid).map(|s| s.name.clone());
+                let ours = self
+                    .sent
+                    .iter()
+                    .find(|s| s.tid == req.tid)
+                    .map(|s| s.name.clone());
                 self.log(format!(
                     "BSR from {}: {} segments{}",
                     self.heard.as_deref().unwrap_or("?"),
                     req.missing.len(),
-                    ours.as_ref().map(|n| format!(" of our {n}")).unwrap_or_default()
+                    ours.as_ref()
+                        .map(|n| format!(" of our {n}"))
+                        .unwrap_or_default()
                 ));
-                let seen = BsrSeen { request: req, from: self.heard.clone(), ours };
+                let seen = BsrSeen {
+                    request: req,
+                    from: self.heard.clone(),
+                    ours,
+                };
                 if self.opts.auto_bsr && seen.ours.is_some() {
                     let s = self.last_settings.clone();
                     self.command(Command::SendRepair(seen.request.clone(), s));
@@ -616,7 +688,9 @@ impl Worker {
                     name: o.name(),
                     received: o.received(),
                     total: o.total,
-                    segments: (0..n).map(|i| o.segments.get(i).is_some_and(|s| s.is_some())).collect(),
+                    segments: (0..n)
+                        .map(|i| o.segments.get(i).is_some_and(|s| s.is_some()))
+                        .collect(),
                     done: o.delivered,
                     updated: Instant::now(),
                 }
@@ -641,7 +715,11 @@ impl Worker {
         v.files.clone_from(&self.rx_files);
         v.bsrs.clone_from(&self.bsrs);
         v.log.clone_from(&self.log);
-        v.tx = self.job.as_ref().map(|j| TxView { what: j.label().to_string(), done_s: j.done_s(), total_s: j.total_s() });
+        v.tx = self.job.as_ref().map(|j| TxView {
+            what: j.label().to_string(),
+            done_s: j.done_s(),
+            total_s: j.total_s(),
+        });
         v.ptt = Some(self.ptt.status());
         v.heard.clone_from(&self.heard);
         v.crc_errors = self.files.crc_errors();
@@ -649,7 +727,10 @@ impl Worker {
 }
 
 fn file_name(p: &Path) -> String {
-    p.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string()
+    p.file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("file")
+        .to_string()
 }
 
 /// `dir/name`, or `dir/name (2).ext` … if it exists.
@@ -673,22 +754,35 @@ pub fn read_wav(path: &Path) -> Result<Vec<f32>, String> {
     let mut r = hound::WavReader::open(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let spec = r.spec();
     if spec.sample_rate != RATE {
-        return Err(format!("{}: {} Hz, 48 kHz needed", path.display(), spec.sample_rate));
+        return Err(format!(
+            "{}: {} Hz, 48 kHz needed",
+            path.display(),
+            spec.sample_rate
+        ));
     }
     let ch = usize::from(spec.channels.max(1));
     let all: Vec<f32> = match spec.sample_format {
         hound::SampleFormat::Float => r.samples::<f32>().filter_map(Result::ok).collect(),
         hound::SampleFormat::Int => {
             let scale = 1.0 / (1u64 << (spec.bits_per_sample - 1)) as f32;
-            r.samples::<i32>().filter_map(Result::ok).map(|v| v as f32 * scale).collect()
+            r.samples::<i32>()
+                .filter_map(Result::ok)
+                .map(|v| v as f32 * scale)
+                .collect()
         }
     };
-    Ok(all.chunks(ch).map(|c| c.iter().sum::<f32>() / ch as f32).collect())
+    Ok(all
+        .chunks(ch)
+        .map(|c| c.iter().sum::<f32>() / ch as f32)
+        .collect())
 }
 
 /// Local wall-clock time as HH:MM:SS (UTC; no time-zone crate).
 fn chrono_hms() -> String {
-    let s = SystemTime::now().duration_since(SystemTime::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+    let s = SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
     format!("{:02}:{:02}:{:02}z", s / 3600 % 24, s / 60 % 60, s % 60)
 }
 

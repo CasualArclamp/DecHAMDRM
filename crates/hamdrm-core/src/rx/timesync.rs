@@ -12,9 +12,9 @@
 //!   filtered to ±1.5 kHz and decimated by 8 (6 kHz). Noise outside the band would
 //!   only dilute the correlation. A frequency shift does not change |correlation|.
 
-use decdrm_core::dsp::fir::{FirDecimator, lowpass};
 use crate::params::{Mode, SAMPLE_RATE};
 use crate::{Cplx, Real};
+use decdrm_core::dsp::fir::{FirDecimator, lowpass};
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 
@@ -56,7 +56,11 @@ struct Geom {
 }
 
 fn geom(m: Mode) -> Geom {
-    Geom { nu: m.fft_size() / DEC, g: m.guard_len() / DEC, ts: m.symbol_len() / DEC }
+    Geom {
+        nu: m.fft_size() / DEC,
+        g: m.guard_len() / DEC,
+        ts: m.symbol_len() / DEC,
+    }
 }
 
 /// One demodulation window: the useful part of an OFDM symbol.
@@ -301,7 +305,8 @@ impl TimeSync {
             // Centre the HamDRM band on 0 Hz, then low-pass and decimate.
             self.mix_scratch.clear();
             for &x in samples {
-                self.mix_scratch.push(x * Cplx::from_polar(1.0, self.band_phase));
+                self.mix_scratch
+                    .push(x * Cplx::from_polar(1.0, self.band_phase));
                 self.band_phase = (self.band_phase + self.band_step) % (2.0 * PI);
             }
             self.dec_scratch.clear();
@@ -356,7 +361,10 @@ impl TimeSync {
                             self.rm_streak += 1;
                             if self.rm_streak >= geom(mode).ts / STEP {
                                 self.mode_acq = false;
-                                events.push(TimeSyncEvent::ModeDetected { mode, reliability: rel });
+                                events.push(TimeSyncEvent::ModeDetected {
+                                    mode,
+                                    reliability: rel,
+                                });
                             }
                         }
                         Some((mode, _)) => {
@@ -420,7 +428,9 @@ impl TimeSync {
     /// threshold) on weak or narrow ones.
     fn detect_mode(&mut self) -> Option<(Mode, Real)> {
         let len = self.rm_buf[0].len();
-        let short: [Real; NUM_MODES] = self.rm_acc.map(|a| a.norm() / len.min(self.rm_len).max(1) as Real);
+        let short: [Real; NUM_MODES] = self
+            .rm_acc
+            .map(|a| a.norm() / len.min(self.rm_len).max(1) as Real);
         self.last_mode_scores = short;
         if let Some(r) = decide(&short, RM_RELIABILITY) {
             return Some(r);
@@ -446,7 +456,11 @@ impl TimeSync {
         self.corr_av_idx += 1;
         if self.corr_av_idx == self.maxdet_len {
             self.corr_av_idx = 0;
-            self.lambda_co_av = if self.lambda_co_av <= 0.1 { 0.1 } else { self.lambda_co_av / 2.0 };
+            self.lambda_co_av = if self.lambda_co_av <= 0.1 {
+                0.1
+            } else {
+                self.lambda_co_av / 2.0
+            };
         }
         // Moving average over one guard interval ("energy" in the guard).
         self.ma.push_back(avg);
@@ -534,7 +548,8 @@ impl TimeSync {
         }
         let samples = self.buf[rel..rel + self.fft_len].to_vec();
         let guard_corr = self.guard_correlation(rel);
-        let power = samples.iter().map(|s| s.norm_sqr()).sum::<Real>() / samples.len().max(1) as Real;
+        let power =
+            samples.iter().map(|s| s.norm_sqr()).sum::<Real>() / samples.len().max(1) as Real;
         let shift = match self.last_start {
             Some(l) => start - (l + self.sym_len as i64),
             None => 0,
@@ -548,7 +563,13 @@ impl TimeSync {
             self.buf.drain(..d);
             self.buf_base += d as i64;
         }
-        Some(SymbolWindow { samples, start, shift, guard_corr, power })
+        Some(SymbolWindow {
+            samples,
+            start,
+            shift,
+            guard_corr,
+            power,
+        })
     }
 
     /// Best normalised cyclic-prefix correlation for the window at buffer index `rel`,
@@ -589,8 +610,20 @@ impl TimeSync {
 
 /// Best mode and its ratio to the second best, if the ratio exceeds `threshold`.
 fn decide(scores: &[Real; NUM_MODES], threshold: Real) -> Option<(Mode, Real)> {
-    let (best, &max) = scores.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1))?;
-    let second = scores.iter().enumerate().filter(|&(i, _)| i != best).map(|(_, &v)| v).fold(0.0, Real::max);
-    let rel = if second > 0.0 { max / second } else { Real::INFINITY };
+    let (best, &max) = scores
+        .iter()
+        .enumerate()
+        .max_by(|a, b| a.1.total_cmp(b.1))?;
+    let second = scores
+        .iter()
+        .enumerate()
+        .filter(|&(i, _)| i != best)
+        .map(|(_, &v)| v)
+        .fold(0.0, Real::max);
+    let rel = if second > 0.0 {
+        max / second
+    } else {
+        Real::INFINITY
+    };
     (rel > threshold).then(|| (Mode::ALL[best], rel))
 }

@@ -9,10 +9,10 @@
 //! ([`SearchWindow`]) with a generous default of 350 ± 250 Hz. No inverted-spectrum
 //! search: HamDRM is always real USB audio.
 
-use decdrm_core::dsp::fft::Fft;
-use decdrm_core::dsp::hamming;
 use crate::params::{DEFAULT_DC_FREQ, SAMPLE_RATE};
 use crate::{Cplx, Real};
+use decdrm_core::dsp::fft::Fft;
+use decdrm_core::dsp::hamming;
 use std::collections::VecDeque;
 
 /// FFT size: 7.8125 Hz resolution at 48 kHz (EasyDRF `FreqSyncAcq.h:54`).
@@ -43,7 +43,10 @@ pub struct SearchWindow {
 impl SearchWindow {
     /// `centre ± span`.
     pub fn around(centre_hz: Real, span_hz: Real) -> Self {
-        Self { min_hz: centre_hz - span_hz, max_hz: centre_hz + span_hz }
+        Self {
+            min_hz: centre_hz - span_hz,
+            max_hz: centre_hz + span_hz,
+        }
     }
 }
 
@@ -140,7 +143,11 @@ impl FreqAcquisition {
 
     fn detect(&mut self) -> Option<Acquisition> {
         let n = FFT_LEN;
-        let psd: Vec<Real> = self.psd_sum.iter().map(|v| v / NUM_AVERAGE as Real).collect();
+        let psd: Vec<Real> = self
+            .psd_sum
+            .iter()
+            .map(|v| v / NUM_AVERAGE as Real)
+            .collect();
         // Noise floor: forward and backward one-pole smoothing, averaged.
         let mut lr = vec![0.0; n];
         let mut rl = vec![0.0; n];
@@ -183,6 +190,10 @@ impl FreqAcquisition {
         }
         // Parseval: Σ|X|² = N·Σ|x·w|².
         let power = psd.iter().sum::<Real>() / (n as Real * self.window_energy);
-        best.map(|(d, score)| Acquisition { dc_hz: d as Real * bin_hz, score, power })
+        best.map(|(d, score)| Acquisition {
+            dc_hz: d as Real * bin_hz,
+            score,
+            power,
+        })
     }
 }

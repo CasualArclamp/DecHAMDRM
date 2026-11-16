@@ -104,7 +104,7 @@ pub struct Decoded {
 pub fn decode(body: &[u8], erased: &[bool], level: u8) -> Option<Decoded> {
     let code = code(level)?;
     let k = code.k;
-    if body.is_empty() || body.len() % N != 0 {
+    if body.is_empty() || !body.len().is_multiple_of(N) {
         return None;
     }
     let blocks = body.len() / N;
@@ -127,10 +127,22 @@ pub fn decode(body: &[u8], erased: &[bool], level: u8) -> Option<Decoded> {
     let surplus = usize::from(stream[0]);
     // QSSTV's encoder adds a whole extra block when (size mod k) > k − 7; the
     // surplus byte is then < 7, which identifies that case.
-    let size = if surplus < 7 { (blocks - 1) * k - surplus } else { blocks * k - surplus };
-    let ext: String = stream[3..6].iter().take_while(|&&c| c != 0).map(|&c| c as char).collect();
+    let size = if surplus < 7 {
+        (blocks - 1) * k - surplus
+    } else {
+        blocks * k - surplus
+    };
+    let ext: String = stream[3..6]
+        .iter()
+        .take_while(|&&c| c != 0)
+        .map(|&c| c as char)
+        .collect();
     let data = stream.get(7..7 + size)?.to_vec();
-    Some(Decoded { data, ext, corrected })
+    Some(Decoded {
+        data,
+        ext,
+        corrected,
+    })
 }
 
 #[cfg(test)]
@@ -159,7 +171,8 @@ mod tests {
                     rx[a..b].iter_mut().for_each(|v| *v = 0x55);
                     erased[a..b].iter_mut().for_each(|e| *e = true);
                 }
-                let d = decode(&rx, &erased, level).unwrap_or_else(|| panic!("level {level} size {size}"));
+                let d = decode(&rx, &erased, level)
+                    .unwrap_or_else(|| panic!("level {level} size {size}"));
                 assert_eq!(d.data, file, "level {level} size {size}");
                 assert_eq!(d.ext, "jpg");
             }

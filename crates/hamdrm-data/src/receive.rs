@@ -12,9 +12,19 @@ use crate::rsfile;
 #[derive(Debug, Clone)]
 pub enum FileEvent {
     /// Progress of an object (after every new segment).
-    Progress { tid: u16, name: Option<String>, received: usize, total: Option<usize> },
+    Progress {
+        tid: u16,
+        name: Option<String>,
+        received: usize,
+        total: Option<usize>,
+    },
     /// A file is complete (name sanitised for saving).
-    File { tid: u16, name: String, data: Vec<u8>, rs: Option<String> },
+    File {
+        tid: u16,
+        name: String,
+        data: Vec<u8>,
+        rs: Option<String>,
+    },
     /// A repeat request (`bsr.bin`) arrived.
     Bsr(BsrRequest),
 }
@@ -57,10 +67,19 @@ impl FileReceiver {
     /// Feed one MSC frame (`None` = lost frame).
     pub fn push(&mut self, frame: Option<&[u8]>) -> Vec<FileEvent> {
         let mut ev = Vec::new();
-        let Some((_, unit)) = self.packets.push(frame) else { return ev };
-        let Some(tid) = self.mot.push(&unit) else { return ev };
+        let Some((_, unit)) = self.packets.push(frame) else {
+            return ev;
+        };
+        let Some(tid) = self.mot.push(&unit) else {
+            return ev;
+        };
         let o = self.mot.get(tid).expect("just pushed");
-        ev.push(FileEvent::Progress { tid, name: o.name(), received: o.received(), total: o.total });
+        ev.push(FileEvent::Progress {
+            tid,
+            name: o.name(),
+            received: o.received(),
+            total: o.total,
+        });
         if o.delivered {
             return ev;
         }
@@ -88,21 +107,44 @@ fn try_complete(o: &RxObject) -> Option<FileEvent> {
             return None;
         }
         let d = rsfile::decode(&body, &erased, level)?;
-        let base = name.as_deref().unwrap_or("file").split('.').next().unwrap_or("file").to_string();
-        let out_name = if d.ext.is_empty() { base } else { format!("{base}.{}", d.ext) };
-        return Some(FileEvent::File { tid: o.tid, name: sanitise(&out_name), data: d.data, rs: Some(format!("RS{level}")) });
+        let base = name
+            .as_deref()
+            .unwrap_or("file")
+            .split('.')
+            .next()
+            .unwrap_or("file")
+            .to_string();
+        let out_name = if d.ext.is_empty() {
+            base
+        } else {
+            format!("{base}.{}", d.ext)
+        };
+        return Some(FileEvent::File {
+            tid: o.tid,
+            name: sanitise(&out_name),
+            data: d.data,
+            rs: Some(format!("RS{level}")),
+        });
     }
     // EasyDRF RS: level in the data-group Rfa bits.
     if o.rs_level > 0 && o.total.is_some() {
         let (body, erased) = o.body_with_erasures();
-        let need = [0.0, 0.88, 0.75, 0.63, 0.50].get(o.rs_level as usize).copied().unwrap_or(1.0);
+        let need = [0.0, 0.88, 0.75, 0.63, 0.50]
+            .get(o.rs_level as usize)
+            .copied()
+            .unwrap_or(1.0);
         let have = erased.iter().filter(|e| !**e).count() as f64 / erased.len().max(1) as f64;
         if have < need && !o.is_complete() {
             return None;
         }
         let (n, data) = easydrf_decode(&body, &erased, o.rs_level)?;
         let (n, data) = unpack_lz(n, data)?;
-        return Some(FileEvent::File { tid: o.tid, name: sanitise(&n), data, rs: Some(format!("EasyDRF RS{}", o.rs_level)) });
+        return Some(FileEvent::File {
+            tid: o.tid,
+            name: sanitise(&n),
+            data,
+            rs: Some(format!("EasyDRF RS{}", o.rs_level)),
+        });
     }
     if !o.is_complete() {
         return None;
@@ -113,7 +155,12 @@ fn try_complete(o: &RxObject) -> Option<FileEvent> {
         return BsrRequest::decode(&body).map(FileEvent::Bsr);
     }
     let (name, data) = unpack_lz(name, body)?;
-    Some(FileEvent::File { tid: o.tid, name: sanitise(&name), data, rs: None })
+    Some(FileEvent::File {
+        tid: o.tid,
+        name: sanitise(&name),
+        data,
+        rs: None,
+    })
 }
 
 /// EasyDRF's RS: field 0x187, roots α¹²⁰…, schifra byte order (first byte = highest
@@ -122,7 +169,7 @@ fn try_complete(o: &RxObject) -> Option<FileEvent> {
 pub fn easydrf_decode(body: &[u8], erased: &[bool], level: u8) -> Option<(String, Vec<u8>)> {
     let k = rsfile::data_len(level)?;
     let code = RsCode::new(0x187, 120, k);
-    if body.is_empty() || body.len() % N != 0 {
+    if body.is_empty() || !body.len().is_multiple_of(N) {
         return None;
     }
     let coded = rsfile::deinterleave(body);
@@ -131,7 +178,10 @@ pub fn easydrf_decode(body: &[u8], erased: &[bool], level: u8) -> Option<(String
     for b in 0..body.len() / N {
         // Reverse to x-power order: memory m ↔ x^(254 − m).
         let mut blk: Vec<u8> = coded[b * N..(b + 1) * N].iter().rev().copied().collect();
-        let pos: Vec<usize> = (0..N).filter(|&m| er[b * N + m]).map(|m| N - 1 - m).collect();
+        let pos: Vec<usize> = (0..N)
+            .filter(|&m| er[b * N + m])
+            .map(|m| N - 1 - m)
+            .collect();
         code.decode(&mut blk, &pos)?;
         blk.reverse();
         stream.extend_from_slice(&blk[..k]);
@@ -140,18 +190,26 @@ pub fn easydrf_decode(body: &[u8], erased: &[bool], level: u8) -> Option<(String
         return None;
     }
     let h = usize::from(stream[16]) | usize::from(stream[17]) << 8;
-    let size = usize::from(stream[18]) | usize::from(stream[19]) << 8 | usize::from(stream[20]) << 16;
+    let size =
+        usize::from(stream[18]) | usize::from(stream[19]) << 8 | usize::from(stream[20]) << 16;
     let name: String = stream.get(21..h)?.iter().map(|&c| c as char).collect();
     let body = stream.get(h..)?;
     // `size` is the original (pre-LZMA) size; for `.lz` the body is self-sized.
-    let data = if name.to_ascii_lowercase().ends_with(".lz") { body.to_vec() } else { body.get(..size)?.to_vec() };
+    let data = if name.to_ascii_lowercase().ends_with(".lz") {
+        body.to_vec()
+    } else {
+        body.get(..size)?.to_vec()
+    };
     Some((name, data))
 }
 
 /// EasyDRF `.lz`: 5 LZMA property bytes, 3-byte LE original size, raw LZMA stream
 /// without end marker (app.md §3.3). Other names pass through.
 pub fn unpack_lz(name: String, data: Vec<u8>) -> Option<(String, Vec<u8>)> {
-    let Some(stem) = name.strip_suffix(".lz").or_else(|| name.strip_suffix(".LZ")) else {
+    let Some(stem) = name
+        .strip_suffix(".lz")
+        .or_else(|| name.strip_suffix(".LZ"))
+    else {
         return Some((name, data));
     };
     if data.len() < 8 {
@@ -174,7 +232,13 @@ pub fn sanitise(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let s: String = base
         .chars()
-        .map(|c| if c.is_control() || "<>:\"|?*".contains(c) { '_' } else { c })
+        .map(|c| {
+            if c.is_control() || "<>:\"|?*".contains(c) {
+                '_'
+            } else {
+                c
+            }
+        })
         .collect();
     let s = s.trim_matches(|c: char| c == '.' || c == ' ').to_string();
     if s.is_empty() { "file".into() } else { s }
@@ -189,8 +253,19 @@ mod tests {
     fn plain_and_rs_with_losses() {
         let data: Vec<u8> = (0..6000u32).map(|i| (i * 7 % 256) as u8).collect();
         for rs in [0u8, 1, 4] {
-            let cfg = SendConfig { packet_len: 127, packet_id: 0, rs_level: rs, lead_in: 0 };
-            let fr = frames(&[OutFile { name: "pic.jpg".into(), data: data.clone() }], &cfg);
+            let cfg = SendConfig {
+                packet_len: 127,
+                packet_id: 0,
+                rs_level: rs,
+                lead_in: 0,
+            };
+            let fr = frames(
+                &[OutFile {
+                    name: "pic.jpg".into(),
+                    data: data.clone(),
+                }],
+                &cfg,
+            );
             let mut rx = FileReceiver::new();
             let mut got = None;
             for (i, f) in fr.iter().enumerate() {
@@ -210,9 +285,25 @@ mod tests {
 
     #[test]
     fn bsr_arrives_as_request() {
-        let req = BsrRequest { tid: 1234, header_ok: true, segment_size: 116, missing: vec![3, 4, 5] };
-        let cfg = SendConfig { packet_len: 127, packet_id: 0, rs_level: 0, lead_in: 0 };
-        let fr = frames(&[OutFile { name: "bsr.bin".into(), data: req.encode(true) }], &cfg);
+        let req = BsrRequest {
+            tid: 1234,
+            header_ok: true,
+            segment_size: 116,
+            missing: vec![3, 4, 5],
+        };
+        let cfg = SendConfig {
+            packet_len: 127,
+            packet_id: 0,
+            rs_level: 0,
+            lead_in: 0,
+        };
+        let fr = frames(
+            &[OutFile {
+                name: "bsr.bin".into(),
+                data: req.encode(true),
+            }],
+            &cfg,
+        );
         let mut rx = FileReceiver::new();
         let mut got = None;
         for f in &fr {

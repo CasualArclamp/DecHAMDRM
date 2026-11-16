@@ -7,8 +7,8 @@ use crate::Real;
 use crate::mlc::{MlcDecoder, MlcEncoder, MlcParams};
 use crate::params::{MscConfig, Qam};
 use decdrm_core::fec::qam::{EqCell, MetricKind};
-use decdrm_core::tables::{QAM4, QAM16, QAM64_SM};
 use decdrm_core::interleave::CellDeinterleaver;
+use decdrm_core::tables::{QAM4, QAM16, QAM64_SM};
 
 /// Output of one decoded MSC frame (before the receiver packs it into bytes).
 pub(crate) struct DecodedMsc {
@@ -41,7 +41,14 @@ impl MscDecoder {
         let enc = MlcEncoder::new(params.clone());
         let mut dec = MlcDecoder::new(params, iterations);
         dec.metric = metric;
-        Self { config, deint: CellDeinterleaver::new(cells, config.interleave.depth()), dec, enc, cells, since_reset: 0 }
+        Self {
+            config,
+            deint: CellDeinterleaver::new(cells, config.interleave.depth()),
+            dec,
+            enc,
+            cells,
+            since_reset: 0,
+        }
     }
 
     pub fn config(&self) -> MscConfig {
@@ -75,17 +82,27 @@ impl MscDecoder {
         for (rx, tx) in cells.iter().zip(&reenc) {
             if rx.chan > 0.0 {
                 counted += 1;
-                if (nearest(rx.sig.re, pam) - tx.re).abs() > 1e-6 || (nearest(rx.sig.im, pam) - tx.im).abs() > 1e-6 {
+                if (nearest(rx.sig.re, pam) - tx.re).abs() > 1e-6
+                    || (nearest(rx.sig.im, pam) - tx.im).abs() > 1e-6
+                {
                     errors += 1;
                 }
             }
         }
         let cell_error_rate = errors as Real / counted.max(1) as Real;
-        Some(DecodedMsc { bits, path_metrics, complete, cell_error_rate })
+        Some(DecodedMsc {
+            bits,
+            path_metrics,
+            complete,
+            cell_error_rate,
+        })
     }
 }
 
 /// The PAM level of `pam` nearest to `v`.
 fn nearest(v: Real, pam: &[Real]) -> Real {
-    pam.iter().copied().min_by(|a, b| (v - a).abs().total_cmp(&(v - b).abs())).unwrap_or(0.0)
+    pam.iter()
+        .copied()
+        .min_by(|a, b| (v - a).abs().total_cmp(&(v - b).abs()))
+        .unwrap_or(0.0)
 }

@@ -8,6 +8,9 @@
 //! Internally a codeword is `c[j]` = coefficient of xʲ. Decoding: syndromes,
 //! Berlekamp–Massey seeded with the erasure locator, Chien search, Forney.
 
+// Index loops over GF tables and polynomial coefficients read like the algebra.
+#![allow(clippy::needless_range_loop)]
+
 /// GF(256) with log/antilog tables.
 #[derive(Debug, Clone)]
 pub struct Gf {
@@ -36,12 +39,20 @@ impl Gf {
     }
 
     pub fn mul(&self, a: u8, b: u8) -> u8 {
-        if a == 0 || b == 0 { 0 } else { self.exp[self.log[a as usize] as usize + self.log[b as usize] as usize] }
+        if a == 0 || b == 0 {
+            0
+        } else {
+            self.exp[self.log[a as usize] as usize + self.log[b as usize] as usize]
+        }
     }
 
     pub fn div(&self, a: u8, b: u8) -> u8 {
         assert!(b != 0, "GF division by zero");
-        if a == 0 { 0 } else { self.exp[(self.log[a as usize] as usize + 255 - self.log[b as usize] as usize) % 255] }
+        if a == 0 {
+            0
+        } else {
+            self.exp[(self.log[a as usize] as usize + 255 - self.log[b as usize] as usize) % 255]
+        }
     }
 
     /// αⁿ for any integer n.
@@ -80,7 +91,12 @@ impl RsCode {
             }
             g = ng;
         }
-        Self { gf, fcr, k, gen_poly: g }
+        Self {
+            gf,
+            fcr,
+            k,
+            gen_poly: g,
+        }
     }
 
     pub fn parity_len(&self) -> usize {
@@ -275,7 +291,10 @@ mod tests {
                         c[p] ^= (lcg(&mut seed) as u8) | 1;
                     }
                     let er = &used[..f];
-                    assert!(code.decode(&mut c, er).is_some(), "poly {poly:x} k {k} e {e} f {f}");
+                    assert!(
+                        code.decode(&mut c, er).is_some(),
+                        "poly {poly:x} k {k} e {e} f {f}"
+                    );
                     assert_eq!(c, good);
                 }
             }

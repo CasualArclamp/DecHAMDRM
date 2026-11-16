@@ -5,9 +5,9 @@
 //! sign on odd symbols (the DRM30 mode-D rule, EasyDRF `CellMappingTable.cpp:379-402`).
 
 use crate::cellmap::CellMap;
-use decdrm_core::dsp::{iir1_c, iir1_lambda, sinc};
 use crate::params::{Mode, SAMPLE_RATE};
 use crate::{Cplx, Real};
+use decdrm_core::dsp::{iir1_c, iir1_lambda, sinc};
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 
@@ -154,7 +154,12 @@ impl FrameSync {
         self.corr_hist.pop_front();
         self.corr_hist.push_back(corr);
         if !self.acquisition {
-            let (imax, _) = self.corr_hist.iter().enumerate().max_by(|a, b| a.1.total_cmp(b.1)).expect("non-empty");
+            let (imax, _) = self
+                .corr_hist
+                .iter()
+                .enumerate()
+                .max_by(|a, b| a.1.total_cmp(b.1))
+                .expect("non-empty");
             let middle = self.ns / 2;
             if imax == middle {
                 // The time reference symbol is in the middle of the history window.
@@ -221,14 +226,19 @@ impl FrameSync {
                 let c = self.freq_pil[i];
                 let k = (self.kmin + c as i32) as Real;
                 // Old pilot rotated to the new window timing.
-                let old = self.old_pil[i] * Cplx::from_polar(1.0, 2.0 * PI * k * shift as Real / self.n as Real);
+                let old = self.old_pil[i]
+                    * Cplx::from_polar(1.0, 2.0 * PI * k * shift as Real / self.n as Real);
                 let cur = cells[c];
                 prods[i] = cur * old.conj();
                 if self.have_old {
                     est += prods[i];
                 }
                 // Mode E: the first two pilots alternate in sign every symbol.
-                self.old_pil[i] = if self.mode == Mode::E && i < 2 { -cur } else { cur };
+                self.old_pil[i] = if self.mode == Mode::E && i < 2 {
+                    -cur
+                } else {
+                    cur
+                };
             }
             if self.have_old {
                 iir1_c(&mut self.freq_vec, est, self.lambda);
@@ -244,7 +254,11 @@ impl FrameSync {
                 }
                 self.sro_count += 1;
                 if self.sro_count >= SRO_EST_MIN_SYMBOLS {
-                    let k: Vec<Real> = self.freq_pil.iter().map(|&c| (self.kmin + c as i32) as Real).collect();
+                    let k: Vec<Real> = self
+                        .freq_pil
+                        .iter()
+                        .map(|&c| (self.kmin + c as i32) as Real)
+                        .collect();
                     let ph: Vec<Real> = self.pil_ph_diff.iter().map(|v| v.arg()).collect();
                     let slope = (decdrm_core::dsp::wrap_phase(ph[1] - ph[0]) / (k[1] - k[0])
                         + decdrm_core::dsp::wrap_phase(ph[2] - ph[0]) / (k[2] - k[0]))
@@ -256,7 +270,14 @@ impl FrameSync {
             self.have_old = true;
         }
 
-        FrameSyncOutput { symbol, id_changed, ready: !self.init_frame_sync, freq_delta_hz, sro_estimate, alignment_lost }
+        FrameSyncOutput {
+            symbol,
+            id_changed,
+            ready: !self.init_frame_sync,
+            freq_delta_hz,
+            sro_estimate,
+            alignment_lost,
+        }
     }
 
     /// Adopt a new carrier layout (spectrum occupancy change) while keeping the

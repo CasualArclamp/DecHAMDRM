@@ -19,14 +19,14 @@
 //! signalled), no SDC — the FAC alone gives bandwidth, QAM, protection and
 //! interleaving — and one MSC stream of ⌊bits/8⌋ bytes per 400 ms frame.
 
+mod chain;
 pub mod chanest;
 pub mod framesync;
 pub mod freqacq;
 pub mod input;
+mod mscdec;
 pub mod ofdm;
 pub mod timesync;
-mod chain;
-mod mscdec;
 
 pub use chain::{CHAN_ROWS, ChainVisuals};
 pub use chanest::{PdsAxis, SNR_REF_BW_HZ};
@@ -190,10 +190,15 @@ pub struct MscFrame {
 #[derive(Debug, Clone)]
 pub enum ReceiverEvent {
     /// A HamDRM signal was found: DC carrier at `dc_hz` in the audio.
-    SignalFound { dc_hz: Real },
+    SignalFound {
+        dc_hz: Real,
+    },
     ModeDetected(Mode),
     /// A FAC block with a valid CRC, and the station label once assembled.
-    Fac { fac: Fac, label: Option<String> },
+    Fac {
+        fac: Fac,
+        label: Option<String>,
+    },
     FacError,
     /// The MSC decoder was (re)configured from the FAC.
     Configured(MscConfig),
@@ -253,7 +258,12 @@ impl InputSpectrum {
         for &s in samples {
             self.buf.push(s);
             if self.buf.len() == SPECTRUM_LEN {
-                let mut work: Vec<Cplx> = self.buf.iter().zip(&self.window).map(|(s, w)| s * *w).collect();
+                let mut work: Vec<Cplx> = self
+                    .buf
+                    .iter()
+                    .zip(&self.window)
+                    .map(|(s, w)| s * *w)
+                    .collect();
                 self.fft.forward(&mut work);
                 let lambda = if self.count < 8 { 0.5 } else { 0.9 };
                 let n2 = (SPECTRUM_LEN * SPECTRUM_LEN) as Real;
@@ -267,7 +277,10 @@ impl InputSpectrum {
     }
 
     fn db(&self) -> Vec<Real> {
-        self.avg.iter().map(|p| 10.0 * p.max(1e-20).log10()).collect()
+        self.avg
+            .iter()
+            .map(|p| 10.0 * p.max(1e-20).log10())
+            .collect()
     }
 }
 
@@ -369,7 +382,10 @@ impl Receiver {
             (Some(dc), Some(mode), Some(bw)) => {
                 let (kmin, kmax) = Layout::new(mode, bw).carrier_range();
                 let df = mode.carrier_spacing();
-                Some((dc + Real::from(kmin) * df - df / 2.0, dc + Real::from(kmax) * df + df / 2.0))
+                Some((
+                    dc + Real::from(kmin) * df - df / 2.0,
+                    dc + Real::from(kmax) * df + df / 2.0,
+                ))
             }
             _ => None,
         };
@@ -384,7 +400,10 @@ impl Receiver {
 
     /// The latest frame's worth of equalised MSC cells (the MSC constellation).
     pub fn msc_constellation(&self) -> Vec<Cplx> {
-        self.chain.as_ref().map(|c| c.msc_constellation()).unwrap_or_default()
+        self.chain
+            .as_ref()
+            .map(|c| c.msc_constellation())
+            .unwrap_or_default()
     }
 
     /// Latest robustness-mode detection scores (A, B, E), for diagnostics.
@@ -417,7 +436,14 @@ impl Receiver {
         self.labels = LabelAssembler::default();
         let s = &self.status;
         let (ok, bad, mok, mbad) = (s.fac_ok, s.fac_bad, s.msc_ok, s.msc_doubtful);
-        self.status = RxStatus { fac_ok: ok, fac_bad: bad, msc_ok: mok, msc_doubtful: mbad, sro_hz: self.sro_hz, ..Default::default() };
+        self.status = RxStatus {
+            fac_ok: ok,
+            fac_bad: bad,
+            msc_ok: mok,
+            msc_doubtful: mbad,
+            sro_hz: self.sro_hz,
+            ..Default::default()
+        };
     }
 
     /// Change the sample-rate correction. Frequencies at the resampler output scale
@@ -449,13 +475,18 @@ impl Receiver {
         self.res.clear();
         let fs = Real::from(SAMPLE_RATE);
         let sro = self.sro_hz.clamp(-MAX_SRO_HZ, MAX_SRO_HZ);
-        self.resampler.process(&self.conv, fs / (fs - sro), &mut self.res);
+        self.resampler
+            .process(&self.conv, fs / (fs - sro), &mut self.res);
         let samples = std::mem::take(&mut self.res);
         if let Some(p0) = self.acq_power
             && !samples.is_empty()
         {
             let p = samples.iter().map(|s| s.norm_sqr()).sum::<Real>() / samples.len() as Real;
-            self.loud_samples = if p > ACQ_POWER_JUMP * p0 { self.loud_samples + samples.len() } else { 0 };
+            self.loud_samples = if p > ACQ_POWER_JUMP * p0 {
+                self.loud_samples + samples.len()
+            } else {
+                0
+            };
         }
 
         if let Some(acq) = self.acq.as_mut() {
@@ -470,7 +501,8 @@ impl Receiver {
                 self.acq = None;
                 self.dc_hz = a.dc_hz;
                 self.track_hz = 0.0;
-                self.events.push(ReceiverEvent::SignalFound { dc_hz: a.dc_hz });
+                self.events
+                    .push(ReceiverEvent::SignalFound { dc_hz: a.dc_hz });
                 self.acq_power = Some(a.power);
                 self.loud_samples = 0;
                 let pending = std::mem::take(&mut self.pending);
@@ -528,7 +560,12 @@ impl Receiver {
         if self.chain.is_none() {
             // Start with the wide layout (a superset of the narrow one's carriers,
             // same Kmin) unless the FAC already told us; the FAC corrects it.
-            let bw = self.msc.as_ref().map(|m| m.config().layout).filter(|l| l.mode == self.mode).map_or(Bandwidth::Wide, |l| l.bandwidth);
+            let bw = self
+                .msc
+                .as_ref()
+                .map(|m| m.config().layout)
+                .filter(|l| l.mode == self.mode)
+                .map_or(Bandwidth::Wide, |l| l.bandwidth);
             let mut chain = SymbolChain::new(Layout::new(self.mode, bw), &self.cfg);
             chain.set_msc_mapping(self.msc.as_ref().map(|m| m.config().qam.mapping()));
             self.chain = Some(chain);
@@ -537,10 +574,16 @@ impl Receiver {
             self.sro_prev = None;
         }
         if let Some(rho) = win.guard_corr {
-            self.cp.update(rho, win.power, self.state == RxState::Locked && self.bad_facs == 0);
+            self.cp.update(
+                rho,
+                win.power,
+                self.state == RxState::Locked && self.bad_facs == 0,
+            );
         }
         // `let … else`: bind the chain or leave the function.
-        let Some(chain) = self.chain.as_mut() else { return };
+        let Some(chain) = self.chain.as_mut() else {
+            return;
+        };
         let out = chain.process(&win);
         if out.alignment_lost && self.state == RxState::Locked && self.bad_facs >= 1 {
             self.resync();
@@ -671,11 +714,18 @@ impl Receiver {
 
     /// Set up the MSC decoder (and, for a new bandwidth, the carrier layout).
     fn configure(&mut self, c: MscConfig) {
-        let Some(chain) = self.chain.as_mut() else { return };
+        let Some(chain) = self.chain.as_mut() else {
+            return;
+        };
         chain.set_bandwidth(c.layout.bandwidth);
         chain.set_msc_mapping(Some(c.qam.mapping()));
         let cells = chain.msc_cells_per_frame();
-        self.msc = Some(MscDecoder::new(c, cells, self.cfg.msc_iterations, self.cfg.metric));
+        self.msc = Some(MscDecoder::new(
+            c,
+            cells,
+            self.cfg.msc_iterations,
+            self.cfg.metric,
+        ));
         self.msc_gap = true;
         self.status.msc = Some(c);
         self.status.bandwidth = Some(c.layout.bandwidth);
@@ -691,12 +741,20 @@ impl Receiver {
             return;
         }
         let gap = gap || std::mem::replace(&mut self.msc_gap, false);
-        let Some(d) = dec.decode(cells, gap) else { return };
+        let Some(d) = dec.decode(cells, gap) else {
+            return;
+        };
         let config = dec.config();
         let nbits = d.bits.len();
         // Pack MSB first, dropping the trailing bits mod 8. `as_chunks::<8>()` splits
         // the slice into fixed `[u8; 8]` arrays (`.0`) and a remainder (`.1`, dropped).
-        let bytes: Vec<u8> = d.bits.as_chunks::<8>().0.iter().map(|b| b.iter().fold(0u8, |acc, &x| (acc << 1) | (x & 1))).collect();
+        let bytes: Vec<u8> = d
+            .bits
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|b| b.iter().fold(0u8, |acc, &x| (acc << 1) | (x & 1)))
+            .collect();
         let fac_ok = fac_cfg == Some(config);
         let trusted = fac_ok && d.complete;
         if trusted {

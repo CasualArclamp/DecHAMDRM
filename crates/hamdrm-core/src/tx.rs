@@ -126,7 +126,13 @@ impl Transmitter {
         let w = 2.0 * PI * self.cfg.dc_freq / f64::from(SAMPLE_RATE);
         for s in 0..self.map.symbols_per_frame {
             self.work.iter_mut().for_each(|v| *v = Cplx::new(0.0, 0.0));
-            for (c, (&ty, &pilot)) in self.map.symbol_cells(s).iter().zip(self.map.symbol_pilots(s)).enumerate() {
+            for (c, (&ty, &pilot)) in self
+                .map
+                .symbol_cells(s)
+                .iter()
+                .zip(self.map.symbol_pilots(s))
+                .enumerate()
+            {
                 let v = if ty.is_msc() {
                     mi += 1;
                     msc_cells[mi - 1]

@@ -22,7 +22,11 @@ pub struct PacketEncoder {
 
 impl PacketEncoder {
     pub fn new(packet_len: usize, packet_id: u8) -> Self {
-        Self { packet_len, packet_id: packet_id & 3, ci: 0 }
+        Self {
+            packet_len,
+            packet_id: packet_id & 3,
+            ci: 0,
+        }
     }
 
     /// Packets (each `packet_len + 3` bytes) for one data unit.
@@ -90,7 +94,13 @@ impl PacketDecoder {
             return None;
         }
         let h = p[0];
-        let (first, last, id, ppi, ci) = (h & 0x80 != 0, h & 0x40 != 0, (h >> 4) & 3, h & 8 != 0, h & 7);
+        let (first, last, id, ppi, ci) = (
+            h & 0x80 != 0,
+            h & 0x40 != 0,
+            (h >> 4) & 3,
+            h & 8 != 0,
+            h & 7,
+        );
         let in_order = self.next_ci == Some(ci);
         self.next_ci = Some((ci + 1) & 7);
         let field = &p[1..n - 2];

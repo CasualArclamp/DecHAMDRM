@@ -14,7 +14,11 @@ use hamdrm_data::send::{OutFile, SendConfig, frames};
 use std::path::PathBuf;
 
 #[derive(Parser)]
-#[command(name = "dechamdrm", version, about = "HamDRM (EasyPal / EasyDRF / QSSTV) modem")]
+#[command(
+    name = "dechamdrm",
+    version,
+    about = "HamDRM (EasyPal / EasyDRF / QSSTV) modem"
+)]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,
@@ -105,7 +109,11 @@ fn parse_config(a: &TxArgs) -> Result<MscConfig> {
         layout: Layout::new(mode, bandwidth),
         qam,
         protection: a.prot,
-        interleave: if a.long { Interleave::Long } else { Interleave::Short },
+        interleave: if a.long {
+            Interleave::Long
+        } else {
+            Interleave::Short
+        },
     })
 }
 
@@ -117,10 +125,19 @@ fn tx(a: TxArgs) -> Result<()> {
     let mut files = Vec::new();
     for p in &a.files {
         let data = std::fs::read(p).with_context(|| format!("reading {}", p.display()))?;
-        let name = p.file_name().and_then(|n| n.to_str()).unwrap_or("file").to_string();
+        let name = p
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("file")
+            .to_string();
         files.push(OutFile { name, data });
     }
-    let send = SendConfig { packet_len: tx.packet_len(), packet_id: 0, rs_level: a.rs, lead_in: a.lead_in };
+    let send = SendConfig {
+        packet_len: tx.packet_len(),
+        packet_id: 0,
+        rs_level: a.rs,
+        lead_in: a.lead_in,
+    };
     let frames = frames(&files, &send);
     // The long interleaver delays cells by up to 4 frames: flush with empty frames.
     let flush = msc.interleave.depth() - 1;
@@ -135,7 +152,12 @@ fn tx(a: TxArgs) -> Result<()> {
     }
     audio.resize(audio.len() + pad, 0.0);
 
-    let spec = hound::WavSpec { channels: 1, sample_rate: SAMPLE_RATE, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
     let mut w = hound::WavWriter::create(&a.out, spec)?;
     for s in &audio {
         w.write_sample((s.clamp(-1.0, 1.0) * 32767.0) as i16)?;
@@ -153,7 +175,8 @@ fn tx(a: TxArgs) -> Result<()> {
 }
 
 fn rx(a: RxArgs) -> Result<()> {
-    let mut r = hound::WavReader::open(&a.input).with_context(|| format!("opening {}", a.input.display()))?;
+    let mut r = hound::WavReader::open(&a.input)
+        .with_context(|| format!("opening {}", a.input.display()))?;
     let spec = r.spec();
     if spec.sample_rate != SAMPLE_RATE {
         bail!("{} Hz: only 48 kHz recordings for now", spec.sample_rate);
@@ -162,10 +185,15 @@ fn rx(a: RxArgs) -> Result<()> {
         hound::SampleFormat::Float => r.samples::<f32>().collect::<Result<_, _>>()?,
         hound::SampleFormat::Int => {
             let scale = 1.0 / (1u64 << (spec.bits_per_sample - 1)) as f32;
-            r.samples::<i32>().map(|s| s.map(|v| v as f32 * scale)).collect::<Result<_, _>>()?
+            r.samples::<i32>()
+                .map(|s| s.map(|v| v as f32 * scale))
+                .collect::<Result<_, _>>()?
         }
     };
-    let cfg = ReceiverConfig { channels: usize::from(spec.channels), ..Default::default() };
+    let cfg = ReceiverConfig {
+        channels: usize::from(spec.channels),
+        ..Default::default()
+    };
     let mut rx = Receiver::new(cfg);
     let mut files = FileReceiver::new();
     std::fs::create_dir_all(&a.out_dir)?;
@@ -179,7 +207,10 @@ fn rx(a: RxArgs) -> Result<()> {
                 ReceiverEvent::Configured(c) => eprintln!("MSC: {c}"),
                 ReceiverEvent::Fac { fac, label } => {
                     if a.verbose {
-                        eprintln!("FAC frame {} {:?} label {:?}", fac.frame, fac.service, label);
+                        eprintln!(
+                            "FAC frame {} {:?} label {:?}",
+                            fac.frame, fac.service, label
+                        );
                     }
                 }
                 ReceiverEvent::Restarted => eprintln!("sync lost, restarting"),
@@ -189,18 +220,36 @@ fn rx(a: RxArgs) -> Result<()> {
                     }
                     for fe in files.push(Some(&f.bytes)) {
                         match fe {
-                            FileEvent::Progress { name, received, total, .. } => {
+                            FileEvent::Progress {
+                                name,
+                                received,
+                                total,
+                                ..
+                            } => {
                                 if a.verbose {
-                                    eprintln!("  {}: {received}/{}", name.as_deref().unwrap_or("?"), total.map_or("?".into(), |t| t.to_string()));
+                                    eprintln!(
+                                        "  {}: {received}/{}",
+                                        name.as_deref().unwrap_or("?"),
+                                        total.map_or("?".into(), |t| t.to_string())
+                                    );
                                 }
                             }
                             FileEvent::File { name, data, rs, .. } => {
                                 let path = a.out_dir.join(&name);
                                 std::fs::write(&path, &data)?;
                                 saved += 1;
-                                eprintln!("received {} ({} bytes{})", path.display(), data.len(), rs.map(|r| format!(", {r}")).unwrap_or_default());
+                                eprintln!(
+                                    "received {} ({} bytes{})",
+                                    path.display(),
+                                    data.len(),
+                                    rs.map(|r| format!(", {r}")).unwrap_or_default()
+                                );
                             }
-                            FileEvent::Bsr(req) => eprintln!("BSR for transport id {}: {} segments missing", req.tid, req.missing.len()),
+                            FileEvent::Bsr(req) => eprintln!(
+                                "BSR for transport id {}: {} segments missing",
+                                req.tid,
+                                req.missing.len()
+                            ),
                         }
                     }
                 }

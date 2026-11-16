@@ -20,8 +20,15 @@ pub(crate) struct Waterfall {
 
 impl Waterfall {
     pub fn new() -> Self {
-        let window = (0..N).map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / N as f32).cos()).collect();
-        Self { fft: FftPlanner::new().plan_fft_forward(N), window, hist: Vec::with_capacity(2 * N), since: 0 }
+        let window = (0..N)
+            .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / N as f32).cos())
+            .collect();
+        Self {
+            fft: FftPlanner::new().plan_fft_forward(N),
+            window,
+            hist: Vec::with_capacity(2 * N),
+            since: 0,
+        }
     }
 
     pub fn push(&mut self, x: &[f32], rows: &mut Vec<Vec<f32>>) {
@@ -33,11 +40,20 @@ impl Waterfall {
             }
             if self.since >= HOP && self.hist.len() == N {
                 self.since = 0;
-                let mut buf: Vec<Complex32> =
-                    self.hist.iter().zip(&self.window).map(|(a, w)| Complex32::new(a * w, 0.0)).collect();
+                let mut buf: Vec<Complex32> = self
+                    .hist
+                    .iter()
+                    .zip(&self.window)
+                    .map(|(a, w)| Complex32::new(a * w, 0.0))
+                    .collect();
                 self.fft.process(&mut buf);
                 let keep = (MAX_HZ / BIN_HZ) as usize + 1;
-                rows.push(buf[..keep].iter().map(|c| 10.0 * (c.norm_sqr() / (N * N) as f32 + 1e-14).log10()).collect());
+                rows.push(
+                    buf[..keep]
+                        .iter()
+                        .map(|c| 10.0 * (c.norm_sqr() / (N * N) as f32 + 1e-14).log10())
+                        .collect(),
+                );
             }
         }
     }

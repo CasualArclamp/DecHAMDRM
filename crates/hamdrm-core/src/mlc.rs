@@ -57,8 +57,18 @@ impl MlcParams {
             Qam::Qam64 => (MSC64_RATES[p].to_vec(), vec![None, Some(0), Some(1)]),
         };
         let coded = 2 * n_mux - 12;
-        let bits = rates.iter().map(|&r| CODE_RATES[r].rx * (coded / CODE_RATES[r].ry)).collect();
-        Self { mapping: qam.mapping(), cells: n_mux, rates, bits, interleaver, is_fac: false }
+        let bits = rates
+            .iter()
+            .map(|&r| CODE_RATES[r].rx * (coded / CODE_RATES[r].ry))
+            .collect();
+        Self {
+            mapping: qam.mapping(),
+            cells: n_mux,
+            rates,
+            bits,
+            interleaver,
+            is_fac: false,
+        }
     }
 
     pub fn for_config(cfg: &MscConfig, n_mux: usize) -> Self {
@@ -90,7 +100,10 @@ impl MlcParams {
 
     fn interleavers(&self) -> [BitInterleaver; 2] {
         let n = 2 * self.cells;
-        [BitInterleaver::new(0, n, T0[0]), BitInterleaver::new(0, n, T0[1])]
+        [
+            BitInterleaver::new(0, n, T0[0]),
+            BitInterleaver::new(0, n, T0[1]),
+        ]
     }
 
     fn split(&self, bits: &[u8]) -> Vec<Vec<u8>> {
@@ -118,7 +131,11 @@ impl MlcEncoder {
     pub fn new(params: MlcParams) -> Self {
         let masks = params.masks();
         let interleavers = params.interleavers();
-        Self { params, masks, interleavers }
+        Self {
+            params,
+            masks,
+            interleavers,
+        }
     }
 
     pub fn params(&self) -> &MlcParams {
@@ -201,11 +218,20 @@ impl MlcDecoder {
         }
         for pass in 0..=self.iterations {
             for j in 0..nl {
-                p.mapping.metrics(cells, j, &self.decided, pass > 0, self.metric, &mut self.metrics);
+                p.mapping.metrics(
+                    cells,
+                    j,
+                    &self.decided,
+                    pass > 0,
+                    self.metric,
+                    &mut self.metrics,
+                );
                 if let Some(t) = p.interleaver[j] {
                     self.interleavers[t].deinterleave(&mut self.metrics);
                 }
-                path[j] = self.viterbi.decode(&self.metrics, &self.masks[j], &mut self.info[j]);
+                path[j] = self
+                    .viterbi
+                    .decode(&self.metrics, &self.masks[j], &mut self.info[j]);
                 if pass < self.iterations || j + 1 < nl {
                     let mut c = std::mem::take(&mut self.decided[j]);
                     conv::encode(&self.info[j], &self.masks[j], &mut c);
@@ -260,7 +286,10 @@ mod tests {
         let data = bits(params.total_bits(), params.cells as u32);
         let mut cells = Vec::new();
         MlcEncoder::new(params.clone()).encode(&data, &mut cells);
-        let eq: Vec<EqCell> = cells.iter().map(|&s| EqCell { sig: s, chan: 1.0 }).collect();
+        let eq: Vec<EqCell> = cells
+            .iter()
+            .map(|&s| EqCell { sig: s, chan: 1.0 })
+            .collect();
         let mut out = Vec::new();
         MlcDecoder::new(params, 1).decode(&eq, &mut out);
         assert_eq!(out, data);
@@ -286,7 +315,13 @@ mod tests {
         ];
         for (m, b, want) in table {
             let n = CellMap::new(Layout::new(m, b)).msc_cells_per_frame;
-            let cfgs = [(Qam::Qam4, 0), (Qam::Qam16, 0), (Qam::Qam16, 1), (Qam::Qam64, 0), (Qam::Qam64, 1)];
+            let cfgs = [
+                (Qam::Qam4, 0),
+                (Qam::Qam16, 0),
+                (Qam::Qam16, 1),
+                (Qam::Qam64, 0),
+                (Qam::Qam64, 1),
+            ];
             for ((q, p), w) in cfgs.into_iter().zip(want) {
                 let params = MlcParams::msc(q, p, n);
                 assert_eq!(params.total_bits(), w, "{m} {b} {q} {p}");

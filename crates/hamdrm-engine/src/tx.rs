@@ -38,9 +38,18 @@ impl Default for TxSettings {
 const SILENCE: usize = 9600; // 200 ms before and after
 
 enum Kind {
-    Frames { tx: Box<Transmitter>, frames: Vec<Vec<u8>>, next: usize, flush: usize },
+    Frames {
+        tx: Box<Transmitter>,
+        frames: Vec<Vec<u8>>,
+        next: usize,
+        flush: usize,
+    },
     Audio(Vec<f32>),
-    Tune { phase: [f64; 3], freqs: [f64; 3], rms: f64 },
+    Tune {
+        phase: [f64; 3],
+        freqs: [f64; 3],
+        rms: f64,
+    },
 }
 
 pub(crate) struct TxJob {
@@ -55,7 +64,15 @@ pub(crate) struct TxJob {
 
 impl TxJob {
     fn new(kind: Kind, total: usize) -> Self {
-        Self { kind, buf: vec![0.0; SILENCE], pos: 0, produced: 0, total: total + 2 * SILENCE, tail: SILENCE, label: String::new() }
+        Self {
+            kind,
+            buf: vec![0.0; SILENCE],
+            pos: 0,
+            produced: 0,
+            total: total + 2 * SILENCE,
+            tail: SILENCE,
+            label: String::new(),
+        }
     }
 
     pub fn with_label(mut self, l: String) -> Self {
@@ -77,13 +94,32 @@ impl TxJob {
     fn of_frames(s: &TxSettings, tx: Transmitter, frames: Vec<Vec<u8>>) -> Self {
         let flush = s.msc.interleave.depth() - 1;
         let total = (frames.len() + flush) * hamdrm_core::params::SAMPLES_PER_FRAME;
-        Self::new(Kind::Frames { tx: Box::new(tx), frames, next: 0, flush }, total)
+        Self::new(
+            Kind::Frames {
+                tx: Box::new(tx),
+                frames,
+                next: 0,
+                flush,
+            },
+            total,
+        )
     }
 
     pub fn files(files: &[(String, Vec<u8>)], s: &TxSettings) -> Self {
         let tx = Self::transmitter(s);
-        let out: Vec<OutFile> = files.iter().map(|(n, d)| OutFile { name: n.clone(), data: d.clone() }).collect();
-        let cfg = SendConfig { packet_len: tx.packet_len(), packet_id: 0, rs_level: s.rs, lead_in: s.lead_in };
+        let out: Vec<OutFile> = files
+            .iter()
+            .map(|(n, d)| OutFile {
+                name: n.clone(),
+                data: d.clone(),
+            })
+            .collect();
+        let cfg = SendConfig {
+            packet_len: tx.packet_len(),
+            packet_id: 0,
+            rs_level: s.rs,
+            lead_in: s.lead_in,
+        };
         let f = frames(&out, &cfg);
         Self::of_frames(s, tx, f)
     }
@@ -91,9 +127,17 @@ impl TxJob {
     /// A BSR is sent twice, plain (EasyDRF `Dialog.cpp:2504-2512`).
     pub fn bsr(req: &BsrRequest, s: &TxSettings) -> Self {
         let tx = Self::transmitter(s);
-        let f = OutFile { name: BSR_NAME.into(), data: req.encode(true) };
-        let cfg = SendConfig { packet_len: tx.packet_len(), packet_id: 0, rs_level: 0, lead_in: 0 };
-        let mut fr = frames(&[f.clone()], &cfg);
+        let f = OutFile {
+            name: BSR_NAME.into(),
+            data: req.encode(true),
+        };
+        let cfg = SendConfig {
+            packet_len: tx.packet_len(),
+            packet_id: 0,
+            rs_level: 0,
+            lead_in: 0,
+        };
+        let mut fr = frames(std::slice::from_ref(&f), &cfg);
         fr.extend(frames(&[f], &cfg));
         Self::of_frames(s, tx, fr)
     }
@@ -102,7 +146,13 @@ impl TxJob {
     /// short lists (`bsr.cpp:280-294`).
     pub fn repair(name: &str, data: &[u8], req: &BsrRequest, s: &TxSettings) -> Self {
         let tx = Self::transmitter(s);
-        let obj: MotObject = object_for(&OutFile { name: name.into(), data: data.to_vec() }, s.rs);
+        let obj: MotObject = object_for(
+            &OutFile {
+                name: name.into(),
+                data: data.to_vec(),
+            },
+            s.rs,
+        );
         let mut mot = MotEncoder::new(segment_size(tx.packet_len()));
         let mut pk = PacketEncoder::new(tx.packet_len(), 0);
         let mut fr = Vec::new();
@@ -124,7 +174,14 @@ impl TxJob {
     pub fn tune(s: &TxSettings) -> Self {
         let sp = Layout::new(Mode::B, Bandwidth::Wide).mode.carrier_spacing();
         let freqs = [8.0, 24.0, 32.0].map(|k| s.dc_freq + k * sp);
-        Self::new(Kind::Tune { phase: [0.0; 3], freqs, rms: s.rms }, usize::MAX / 4)
+        Self::new(
+            Kind::Tune {
+                phase: [0.0; 3],
+                freqs,
+                rms: s.rms,
+            },
+            usize::MAX / 4,
+        )
     }
 
     pub fn is_tune(&self) -> bool {
@@ -132,7 +189,11 @@ impl TxJob {
     }
 
     pub fn total_s(&self) -> f64 {
-        if self.is_tune() { 0.0 } else { self.total as f64 / f64::from(SAMPLE_RATE) }
+        if self.is_tune() {
+            0.0
+        } else {
+            self.total as f64 / f64::from(SAMPLE_RATE)
+        }
     }
 
     pub fn done_s(&self) -> f64 {
@@ -145,7 +206,12 @@ impl TxJob {
 
     fn source_done(&self) -> bool {
         match &self.kind {
-            Kind::Frames { frames, next, flush, .. } => *next >= frames.len() + flush,
+            Kind::Frames {
+                frames,
+                next,
+                flush,
+                ..
+            } => *next >= frames.len() + flush,
             Kind::Audio(a) => a.is_empty(),
             Kind::Tune { .. } => false,
         }
@@ -155,7 +221,12 @@ impl TxJob {
         self.buf.clear();
         self.pos = 0;
         match &mut self.kind {
-            Kind::Frames { tx, frames, next, flush } => {
+            Kind::Frames {
+                tx,
+                frames,
+                next,
+                flush,
+            } => {
                 if *next < frames.len() {
                     tx.push_frame(&frames[*next], &mut self.buf);
                     *next += 1;

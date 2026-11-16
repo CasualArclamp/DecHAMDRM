@@ -47,17 +47,24 @@ impl Default for Prefs {
 }
 
 fn dir() -> Option<PathBuf> {
-    std::env::var_os("APPDATA").or_else(|| std::env::var_os("HOME")).map(|d| PathBuf::from(d).join("DecHAMDRM"))
+    std::env::var_os("APPDATA")
+        .or_else(|| std::env::var_os("HOME"))
+        .map(|d| PathBuf::from(d).join("DecHAMDRM"))
 }
 
 fn default_out_dir() -> PathBuf {
-    dir().map(|d| d.join("Rx Files")).unwrap_or_else(|| PathBuf::from("Rx Files"))
+    dir()
+        .map(|d| d.join("Rx Files"))
+        .unwrap_or_else(|| PathBuf::from("Rx Files"))
 }
 
 impl Prefs {
     pub fn load() -> Self {
         let mut p = Self::default();
-        let Some(text) = dir().and_then(|d| std::fs::read_to_string(d.join("prefs.txt")).ok()) else { return p };
+        let Some(text) = dir().and_then(|d| std::fs::read_to_string(d.join("prefs.txt")).ok())
+        else {
+            return p;
+        };
         let map: HashMap<String, String> = text
             .lines()
             .filter_map(|l| l.split_once('='))
@@ -72,7 +79,11 @@ impl Prefs {
             Some("E") => Mode::E,
             _ => Mode::B,
         };
-        p.bandwidth = if get("bandwidth") == Some("narrow") { Bandwidth::Narrow } else { Bandwidth::Wide };
+        p.bandwidth = if get("bandwidth") == Some("narrow") {
+            Bandwidth::Narrow
+        } else {
+            Bandwidth::Wide
+        };
         p.qam = match get("qam") {
             Some("4") => Qam::Qam4,
             Some("64") => Qam::Qam64,
@@ -102,7 +113,15 @@ impl Prefs {
         let mut kv = |k: &str, v: String| s.push_str(&format!("{k}={v}\n"));
         kv("call", self.call.clone());
         kv("mode", self.mode.to_string());
-        kv("bandwidth", if self.bandwidth == Bandwidth::Narrow { "narrow" } else { "wide" }.into());
+        kv(
+            "bandwidth",
+            if self.bandwidth == Bandwidth::Narrow {
+                "narrow"
+            } else {
+                "wide"
+            }
+            .into(),
+        );
         kv(
             "qam",
             match self.qam {

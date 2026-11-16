@@ -1,0 +1,109 @@
+# Portable Windows release of a tag. Pushing a tag v* (or Actions → Release → Run
+# workflow with an existing tag) builds dechamdrm-gui.exe and dechamdrm.exe with the static C runtime,
+# checks that its version matches the tag and that it needs no C runtime DLL, and
+# uploads it with its SHA-256 to a draft release of the tag. Then write the release
+# notes and publish it:
+#
+#   gh release edit vX.Y.Z --notes-file notes.md --draft=false --latest
+#
+# A release that is already published is never touched: the job fails instead. A trial
+# run without a release: `gh workflow run release.yml -f tag=main -f upload=false`.
+# (Pattern from DecSAT's release workflow.)
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build (vX.Y.Z), or a branch for a trial run without upload
+        required: true
+      upload:
+        description: Upload the executable to a draft release of the tag
+        type: boolean
+        default: true
+
+concurrency:
+  group: release-${{ inputs.tag || github.ref_name }}
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    name: Windows portable
+    runs-on: windows-latest
+    timeout-minutes: 60
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ env.TAG }}
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+      - name: Build (static C runtime)
+        env:
+          RUSTFLAGS: -C target-feature=+crt-static
+        run: cargo build --release --target x86_64-pc-windows-msvc -p hamdrm-gui -p hamdrm-cli
+      - name: Check (version, no C runtime DLL)
+        shell: bash
+        run: |
+          set -euo pipefail
+          bin=target/x86_64-pc-windows-msvc/release
+          "$bin/dechamdrm-gui" --version
+          if [[ $TAG == v* ]]; then
+            test "$("$bin/dechamdrm-gui" --version)" = "dechamdrm-gui ${TAG#v}"
+          fi
+          for f in dechamdrm-gui.exe dechamdrm.exe; do
+            if grep -a -q -i -e vcruntime140 -e api-ms-win-crt "$bin/$f"; then
+              echo "$f imports a C runtime DLL: not a static build" >&2
+              exit 1
+            fi
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dechamdrm-gui
+          path: |
+            target/x86_64-pc-windows-msvc/release/dechamdrm-gui.exe
+            target/x86_64-pc-windows-msvc/release/dechamdrm.exe
+      - name: Draft release
+        if: github.event_name == 'push' || inputs.upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          cp target/x86_64-pc-windows-msvc/release/dechamdrm-gui.exe target/x86_64-pc-windows-msvc/release/dechamdrm.exe .
+          {
+            echo "Portable Windows executable for 64-bit Windows 10/11, nothing to install (static C runtime)."
+            echo
+            echo "| File | What |"
+            echo "|---|---|"
+            echo "| \`dechamdrm-gui.exe\` | HamDRM modem: send and receive pictures and files (EasyPal / EasyDRF / QSSTV compatible), waterfall ID, BSR repeat requests, PTT by CAT (IC-7300, FT-710, rigctld) or DTR/RTS |"
+            echo "| \`dechamdrm.exe\` | Command line: \`tx\` files to a WAV, \`rx\` a recording to files |"
+            echo
+            echo "Windows SmartScreen may warn on first start because the file is unsigned (\"More info\", then \"Run anyway\")."
+            echo
+            echo "Built from $(git rev-parse --short HEAD) by [GitHub Actions]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)."
+            echo
+            echo "SHA-256:"
+            echo '```'
+            # (Git Bash's sha256sum marks binary mode with a star: "hash *file".)
+            sha256sum dechamdrm-gui.exe dechamdrm.exe | sed 's/ \*/  /'
+            echo '```'
+          } > notes.md
+          if draft=$(gh release view "$TAG" --json isDraft --jq .isDraft 2> /dev/null); then
+            if [ "$draft" != true ]; then
+              echo "release $TAG is already published: not replacing its files" >&2
+              exit 1
+            fi
+            gh release upload "$TAG" dechamdrm-gui.exe dechamdrm.exe --clobber
+            gh release edit "$TAG" --notes-file notes.md
+          else
+            gh release create "$TAG" --draft --verify-tag --title "DecHAMDRM ${TAG#v} (Windows portable)" \
+              --notes-file notes.md dechamdrm-gui.exe dechamdrm.exe
+          fi
+          cat notes.md >> "$GITHUB_STEP_SUMMARY"

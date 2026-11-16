@@ -12,11 +12,11 @@ pub mod time_wiener;
 pub mod track;
 
 use crate::cellmap::{CellMap, DATA_CELL_POWER};
+use crate::params::{Mode, SAMPLE_RATE};
+use crate::{Cplx, Real};
 use decdrm_core::dsp::{iir1, iir1_lambda, levinson, sinc};
 use decdrm_core::fec::qam::{EqCell, Mapping};
-use crate::params::{Mode, SAMPLE_RATE};
 use decdrm_core::tables::{QAM4, QAM16, QAM64_SM};
-use crate::{Cplx, Real};
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 use std::sync::Arc;
@@ -186,7 +186,11 @@ impl ChannelEstimator {
             map,
         };
         let (gn, gd) = est.map.mode().guard_ratio();
-        est.update_freq_wiener(10f64.powf(INIT_SNR_WIEN_FREQ_DB / 10.0), gn as Real / gd as Real, 0.0);
+        est.update_freq_wiener(
+            10f64.powf(INIT_SNR_WIEN_FREQ_DB / 10.0),
+            gn as Real / gd as Real,
+            0.0,
+        );
         est
     }
 
@@ -226,8 +230,11 @@ impl ChannelEstimator {
         let snr = snr.max(1.0);
         let filters: Vec<Vec<Cplx>> = (0..n_filters)
             .map(|diff| {
-                let rhp: Vec<Real> = (0..l).map(|i| sinc(((i * x) as Real - diff as Real) * len_ratio)).collect();
-                let mut rpp: Vec<Real> = (0..l).map(|i| sinc((i * x) as Real * len_ratio)).collect();
+                let rhp: Vec<Real> = (0..l)
+                    .map(|i| sinc(((i * x) as Real - diff as Real) * len_ratio))
+                    .collect();
+                let mut rpp: Vec<Real> =
+                    (0..l).map(|i| sinc((i * x) as Real * len_ratio)).collect();
                 rpp[0] += 1.0 / snr;
                 let h = levinson(&rpp, &rhp);
                 (0..l)
@@ -268,7 +275,9 @@ impl ChannelEstimator {
 
         let snr_pil = self.snr_estimate * self.snr_pil_corr;
         let mut grid = std::mem::take(&mut self.grid);
-        let snr_after_ti = self.tw.estimate(&map, sym, s, self.cum_shift, out_cum, snr_pil, &mut grid);
+        let snr_after_ti =
+            self.tw
+                .estimate(&map, sym, s, self.cum_shift, out_cum, snr_pil, &mut grid);
 
         if self.init_cnt > 0 {
             self.init_cnt -= 1;
@@ -279,7 +288,11 @@ impl ChannelEstimator {
         // Impulse-response tracking and delay spread.
         self.last_track = self.track.process(&grid, shift);
         let t = self.last_track;
-        self.update_freq_wiener(snr_after_ti, t.pds_len / self.n_car as Real, t.pds_offset / self.n_car as Real);
+        self.update_freq_wiener(
+            snr_after_ti,
+            t.pds_len / self.n_car as Real,
+            t.pds_offset / self.n_car as Real,
+        );
 
         // Frequency interpolation.
         let mut chan = vec![Cplx::new(0.0, 0.0); self.n_car];
@@ -301,17 +314,34 @@ impl ChannelEstimator {
             .zip(&chan)
             .map(|(r, h)| {
                 let p = h.norm_sqr();
-                if p > 0.0 { EqCell { sig: r / h, chan: p } } else { EqCell { sig: Cplx::new(0.0, 0.0), chan: 0.0 } }
+                if p > 0.0 {
+                    EqCell {
+                        sig: r / h,
+                        chan: p,
+                    }
+                } else {
+                    EqCell {
+                        sig: Cplx::new(0.0, 0.0),
+                        chan: 0.0,
+                    }
+                }
             })
             .collect();
 
         self.update_quality(&map, &cells, out_s);
-        Some(EqSymbol { symbol: out_s, cells, chan, cum_shift })
+        Some(EqSymbol {
+            symbol: out_s,
+            cells,
+            chan,
+            cum_shift,
+        })
     }
 
     fn update_quality(&mut self, map: &CellMap, cells: &[EqCell], s: usize) {
         let row = map.symbol_cells(s);
-        let min_dist4 = |c: Cplx| -> Real { nearest_err(c.re, &QAM4).powi(2) + nearest_err(c.im, &QAM4).powi(2) };
+        let min_dist4 = |c: Cplx| -> Real {
+            nearest_err(c.re, &QAM4).powi(2) + nearest_err(c.im, &QAM4).powi(2)
+        };
 
         // SNR from FAC decisions.
         if self.snr_init_cnt > 0 {
@@ -369,7 +399,8 @@ impl ChannelEstimator {
             };
             for (c, ty) in row.iter().enumerate() {
                 if ty.is_msc() {
-                    let e = nearest_err(cells[c].sig.re, pam).powi(2) + nearest_err(cells[c].sig.im, pam).powi(2);
+                    let e = nearest_err(cells[c].sig.re, pam).powi(2)
+                        + nearest_err(cells[c].sig.im, pam).powi(2);
                     iir1(&mut self.noise_msc[c], e * cells[c].chan, self.lam_msc);
                     iir1(&mut self.sig_msc[c], cells[c].chan, self.lam_msc);
                     self.mer_acc += e;
@@ -400,15 +431,23 @@ impl ChannelEstimator {
             self.wmm_sig = 0.0;
         }
         self.stats.doppler_hz = 2.0 * self.tw.sigma();
-        let ir_sample_ms = map.mode().fft_size() as Real / (Real::from(SAMPLE_RATE) * (self.num_pil * self.x) as Real) * 1000.0;
+        let ir_sample_ms = map.mode().fft_size() as Real
+            / (Real::from(SAMPLE_RATE) * (self.num_pil * self.x) as Real)
+            * 1000.0;
         let (gn, gd) = map.mode().guard_ratio();
-        let symbol_s = map.mode().fft_size() as Real * (1.0 + gn as Real / gd as Real) / Real::from(SAMPLE_RATE);
+        let symbol_s = map.mode().fft_size() as Real * (1.0 + gn as Real / gd as Real)
+            / Real::from(SAMPLE_RATE);
         let keep = (1.0 / symbol_s).ceil() as usize;
-        self.delay_hist.push_back((self.last_track.pds_len * ir_sample_ms).max(0.0));
+        self.delay_hist
+            .push_back((self.last_track.pds_len * ir_sample_ms).max(0.0));
         while self.delay_hist.len() > keep {
             self.delay_hist.pop_front();
         }
-        self.stats.delay_ms = self.delay_hist.iter().copied().fold(Real::INFINITY, Real::min);
+        self.stats.delay_ms = self
+            .delay_hist
+            .iter()
+            .copied()
+            .fold(Real::INFINITY, Real::min);
     }
 
     /// Per-carrier SNR (dB) of the MSC cells, for plotting.
@@ -416,7 +455,9 @@ impl ChannelEstimator {
         (0..self.n_car)
             .filter(|&c| self.sig_msc[c] != 0.0)
             .map(|c| {
-                let v = bound_snr(self.sig_msc[c], self.noise_msc[c]) * self.snr_fac_corr * self.sys_to_nom_bw;
+                let v = bound_snr(self.sig_msc[c], self.noise_msc[c])
+                    * self.snr_fac_corr
+                    * self.sys_to_nom_bw;
                 (self.map.carrier_index(c), 10.0 * v.log10())
             })
             .collect()
@@ -424,10 +465,16 @@ impl ChannelEstimator {
 }
 
 fn nearest_err(v: Real, pam: &[Real]) -> Real {
-    pam.iter().map(|p| (v - p).abs()).fold(Real::INFINITY, Real::min)
+    pam.iter()
+        .map(|p| (v - p).abs())
+        .fold(Real::INFINITY, Real::min)
 }
 
 fn bound_snr(sig: Real, noise: Real) -> Real {
-    let r = if noise.abs() > Real::EPSILON { sig / noise } else { 1.0 };
+    let r = if noise.abs() > Real::EPSILON {
+        sig / noise
+    } else {
+        1.0
+    };
     r.max(1.0)
 }

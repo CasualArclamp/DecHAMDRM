@@ -86,8 +86,14 @@ fn run(segments: &[(MscConfig, usize)], imp: &Impair) -> Outcome {
             if trace {
                 let t = ci as Real * 0.1;
                 match &ev {
-                    ReceiverEvent::Msc(m) => eprintln!("{t:5.1}s MSC trusted={} match={:?}", m.trusted, sent.get(&m.bytes)),
-                    ReceiverEvent::Fac { fac, .. } => eprintln!("{t:5.1}s FAC frame {} {:?}", fac.frame, rx.status()),
+                    ReceiverEvent::Msc(m) => eprintln!(
+                        "{t:5.1}s MSC trusted={} match={:?}",
+                        m.trusted,
+                        sent.get(&m.bytes)
+                    ),
+                    ReceiverEvent::Fac { fac, .. } => {
+                        eprintln!("{t:5.1}s FAC frame {} {:?}", fac.frame, rx.status())
+                    }
                     e => eprintln!("{t:5.1}s {e:?}"),
                 }
             }
@@ -117,7 +123,15 @@ fn run(segments: &[(MscConfig, usize)], imp: &Impair) -> Outcome {
         }
         if std::env::var_os("HAMDRM_TRACE2").is_some() {
             let st = rx.status();
-            eprintln!("{:5.1}s {:?} {:?} dc={:?} snr={:?} sro={:.2}", ci as Real * 0.1, st.state, st.frame_sync, st.dc_frequency_hz, st.snr_db, st.sro_hz);
+            eprintln!(
+                "{:5.1}s {:?} {:?} dc={:?} snr={:?} sro={:.2}",
+                ci as Real * 0.1,
+                st.state,
+                st.frame_sync,
+                st.dc_frequency_hz,
+                st.snr_db,
+                st.sro_hz
+            );
         }
         // Quality as seen while the signal is on (not in the trailing silence).
         if (ci + 1) * 4800 < signal_end {
@@ -192,7 +206,12 @@ fn analytic(x: &[Real]) -> Vec<Cplx> {
 }
 
 fn cfg(mode: Mode, bw: Bandwidth, qam: Qam, protection: u8, interleave: Interleave) -> MscConfig {
-    MscConfig { layout: Layout::new(mode, bw), qam, protection, interleave }
+    MscConfig {
+        layout: Layout::new(mode, bw),
+        qam,
+        protection,
+        interleave,
+    }
 }
 
 fn short(mode: Mode, bw: Bandwidth, qam: Qam) -> MscConfig {
@@ -215,7 +234,13 @@ fn check_clean(o: &Outcome, what: &str) {
 fn clean_every_layout_16qam() {
     for layout in Layout::all() {
         let c = short(layout.mode, layout.bandwidth, Qam::Qam16);
-        let o = run(&[(c, 16)], &Impair { seed: 1, ..Default::default() });
+        let o = run(
+            &[(c, 16)],
+            &Impair {
+                seed: 1,
+                ..Default::default()
+            },
+        );
         check_clean(&o, &c.to_string());
         assert_eq!(o.modes.last(), Some(&layout.mode));
         assert_eq!(o.label.as_deref(), Some("TEST1"));
@@ -224,10 +249,20 @@ fn clean_every_layout_16qam() {
 
 #[test]
 fn clean_4qam_and_64qam() {
-    for (mode, bw) in [(Mode::A, Bandwidth::Narrow), (Mode::B, Bandwidth::Wide), (Mode::E, Bandwidth::Wide)] {
+    for (mode, bw) in [
+        (Mode::A, Bandwidth::Narrow),
+        (Mode::B, Bandwidth::Wide),
+        (Mode::E, Bandwidth::Wide),
+    ] {
         for (qam, prot) in [(Qam::Qam4, 0), (Qam::Qam64, 0), (Qam::Qam64, 1)] {
             let c = cfg(mode, bw, qam, prot, Interleave::Short);
-            let o = run(&[(c, 14)], &Impair { seed: 2, ..Default::default() });
+            let o = run(
+                &[(c, 14)],
+                &Impair {
+                    seed: 2,
+                    ..Default::default()
+                },
+            );
             check_clean(&o, &c.to_string());
         }
     }
@@ -236,7 +271,14 @@ fn clean_4qam_and_64qam() {
 #[test]
 fn long_interleaver() {
     let c = cfg(Mode::B, Bandwidth::Wide, Qam::Qam16, 1, Interleave::Long);
-    let o = run(&[(c, 20)], &Impair { snr_db: Some(20.0), seed: 3, ..Default::default() });
+    let o = run(
+        &[(c, 20)],
+        &Impair {
+            snr_db: Some(20.0),
+            seed: 3,
+            ..Default::default()
+        },
+    );
     // The long interleaver adds four frames of delay and fill.
     eprintln!("long: {o:?}");
     assert_eq!(o.trusted_wrong, 0);
@@ -247,7 +289,13 @@ fn long_interleaver() {
 fn awgn_offset_and_sample_rate() {
     // +37 Hz tuning error, 100 ppm clock offset, 15 dB SNR.
     let c = short(Mode::B, Bandwidth::Wide, Qam::Qam16);
-    let imp = Impair { snr_db: Some(15.0), freq_offset_hz: 37.0, sro_ppm: 100.0, seed: 4, ..Default::default() };
+    let imp = Impair {
+        snr_db: Some(15.0),
+        freq_offset_hz: 37.0,
+        sro_ppm: 100.0,
+        seed: 4,
+        ..Default::default()
+    };
     let o = run(&[(c, 25)], &imp);
     check_clean(&o, "B 16-QAM +37 Hz 100 ppm 15 dB");
     let dc = o.dc_hz.unwrap();
@@ -261,7 +309,12 @@ fn large_tuning_offsets() {
     // The default DC search covers 350 ± 250 Hz.
     for (foff, mode) in [(-150.0, Mode::E), (200.0, Mode::A)] {
         let c = short(mode, Bandwidth::Wide, Qam::Qam16);
-        let imp = Impair { snr_db: Some(20.0), freq_offset_hz: foff, seed: 8, ..Default::default() };
+        let imp = Impair {
+            snr_db: Some(20.0),
+            freq_offset_hz: foff,
+            seed: 8,
+            ..Default::default()
+        };
         let o = run(&[(c, 16)], &imp);
         check_clean(&o, &format!("{c} {foff:+} Hz"));
         let dc = o.dc_hz.unwrap();
@@ -272,11 +325,16 @@ fn large_tuning_offsets() {
 #[test]
 fn noise_only_decodes_nothing() {
     let mut rng = Rng::new(9);
-    let noise: Vec<f32> = (0..SAMPLE_RATE as usize * 15).map(|_| (0.1 * rng.gaussian()) as f32).collect();
+    let noise: Vec<f32> = (0..SAMPLE_RATE as usize * 15)
+        .map(|_| (0.1 * rng.gaussian()) as f32)
+        .collect();
     let mut rx = Receiver::new(ReceiverConfig::default());
     for chunk in noise.chunks(4800) {
         for ev in rx.push(chunk) {
-            assert!(!matches!(ev, ReceiverEvent::Msc(_) | ReceiverEvent::Fac { .. }), "{ev:?}");
+            assert!(
+                !matches!(ev, ReceiverEvent::Msc(_) | ReceiverEvent::Fac { .. }),
+                "{ev:?}"
+            );
         }
     }
 }
@@ -284,9 +342,17 @@ fn noise_only_decodes_nothing() {
 #[test]
 fn hf_fading_two_path() {
     // CCIR-poor-like: two equal paths 2 ms apart, 1 Hz Doppler spread each, 4-QAM.
-    let model = ChannelModel::custom(vec![Path::new(0.0, 1.0, 0.0, 1.0), Path::new(2.0, 1.0, 0.0, 1.0)]);
+    let model = ChannelModel::custom(vec![
+        Path::new(0.0, 1.0, 0.0, 1.0),
+        Path::new(2.0, 1.0, 0.0, 1.0),
+    ]);
     let c = short(Mode::B, Bandwidth::Wide, Qam::Qam4);
-    let imp = Impair { snr_db: Some(20.0), model: Some(model), seed: 5, ..Default::default() };
+    let imp = Impair {
+        snr_db: Some(20.0),
+        model: Some(model),
+        seed: 5,
+        ..Default::default()
+    };
     let o = run(&[(c, 30)], &imp);
     eprintln!("fading: {o:?}");
     assert_eq!(o.trusted_wrong, 0);
@@ -299,7 +365,14 @@ fn config_change_mid_stream() {
     // Same mode (not signalled), new bandwidth, constellation and protection.
     let a = short(Mode::B, Bandwidth::Wide, Qam::Qam16);
     let b = cfg(Mode::B, Bandwidth::Narrow, Qam::Qam64, 1, Interleave::Short);
-    let o = run(&[(a, 12), (b, 12)], &Impair { snr_db: Some(25.0), seed: 6, ..Default::default() });
+    let o = run(
+        &[(a, 12), (b, 12)],
+        &Impair {
+            snr_db: Some(25.0),
+            seed: 6,
+            ..Default::default()
+        },
+    );
     eprintln!("change: {o:?}");
     assert_eq!(o.trusted_wrong, 0);
     assert!(o.matched[0] + ACQ_FRAMES >= 12, "{o:?}");
@@ -311,10 +384,20 @@ fn config_change_mid_stream() {
 #[test]
 #[ignore]
 fn diag() {
-    let Ok(spec) = std::env::var("HAMDRM_DIAG") else { return };
+    let Ok(spec) = std::env::var("HAMDRM_DIAG") else {
+        return;
+    };
     let v: Vec<&str> = spec.split_whitespace().collect();
-    let mode = match v[0] { "A" => Mode::A, "E" => Mode::E, _ => Mode::B };
-    let qam = match v[1] { "4" => Qam::Qam4, "64" => Qam::Qam64, _ => Qam::Qam16 };
+    let mode = match v[0] {
+        "A" => Mode::A,
+        "E" => Mode::E,
+        _ => Mode::B,
+    };
+    let qam = match v[1] {
+        "4" => Qam::Qam4,
+        "64" => Qam::Qam64,
+        _ => Qam::Qam16,
+    };
     let p = |i: usize| v[i].parse::<Real>().unwrap();
     let snr = p(2);
     let imp = Impair {
@@ -335,7 +418,14 @@ fn mode_change_mid_stream() {
     // and detect the new mode.
     let a = short(Mode::B, Bandwidth::Wide, Qam::Qam16);
     let b = short(Mode::E, Bandwidth::Wide, Qam::Qam16);
-    let o = run(&[(a, 12), (b, 30)], &Impair { snr_db: Some(25.0), seed: 7, ..Default::default() });
+    let o = run(
+        &[(a, 12), (b, 30)],
+        &Impair {
+            snr_db: Some(25.0),
+            seed: 7,
+            ..Default::default()
+        },
+    );
     eprintln!("mode change: {o:?}");
     assert!(o.matched[1] >= 10, "{o:?}");
 }
@@ -344,7 +434,10 @@ fn mode_change_mid_stream() {
 /// outcome (for the cell-error-rate statistics).
 fn success(c: MscConfig, imp: &Impair, frames: usize) -> (Real, Outcome) {
     let o = run(&[(c, frames)], imp);
-    let ok = o.matched_idx[0].iter().filter(|&&f| f >= ACQ_FRAMES).count();
+    let ok = o.matched_idx[0]
+        .iter()
+        .filter(|&&f| f >= ACQ_FRAMES)
+        .count();
     (ok as Real / (frames - ACQ_FRAMES) as Real, o)
 }
 
@@ -367,7 +460,15 @@ fn awgn_threshold_sweep() {
         while snr > -2.0 {
             let (mut rate, mut good, mut bad, mut false_trust) = (0.0, Vec::new(), Vec::new(), 0);
             for seed in 0..2 {
-                let (r, o) = success(c, &Impair { snr_db: Some(snr), seed: 100 + seed, ..Default::default() }, 60);
+                let (r, o) = success(
+                    c,
+                    &Impair {
+                        snr_db: Some(snr),
+                        seed: 100 + seed,
+                        ..Default::default()
+                    },
+                    60,
+                );
                 rate += r / 2.0;
                 good.extend(o.cer_good);
                 bad.extend(o.cer_bad);

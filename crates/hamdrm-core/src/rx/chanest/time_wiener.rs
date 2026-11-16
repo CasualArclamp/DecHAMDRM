@@ -6,9 +6,9 @@
 //! r(τ) = exp(−2π²·σ²·Ts²·τ²), τ in OFDM symbols.
 
 use crate::cellmap::CellMap;
-use decdrm_core::dsp::{iir1_c, iir1_lambda, levinson, linear_regression_slope};
 use crate::params::{Mode, SAMPLE_RATE};
 use crate::{Cplx, Real};
+use decdrm_core::dsp::{iir1_c, iir1_lambda, levinson, linear_regression_slope};
 use std::collections::VecDeque;
 use std::f64::consts::PI;
 
@@ -69,10 +69,15 @@ impl TimeWiener {
         let delay = ((len * t - t + 1) as Real / 2.0).ceil() as usize + t / 2 - 1;
         let ts = mode.symbol_len() as Real / Real::from(SAMPLE_RATE);
         let grid_len = (map.num_carriers - 1) / map.scattered.freq_int + 1;
-        let s0 = (0..map.symbols_per_frame).find(|&s| map.cell(s, 0).is_scattered()).unwrap_or(0);
+        let s0 = (0..map.symbols_per_frame)
+            .find(|&s| map.cell(s, 0).is_scattered())
+            .unwrap_or(0);
         let num_pil_one_sym = grid_len.div_ceil(t);
         let lambda_ticorr = iir1_lambda(TICONST_TI_CORREL_EST * num_pil_one_sym as Real, 1.0 / ts);
-        let init = PilotSample { h: Cplx::new(1.0, 0.0), cum_shift: 0 };
+        let init = PilotSample {
+            h: Cplx::new(1.0, 0.0),
+            cum_shift: 0,
+        };
         let mut w = Self {
             len,
             t,
@@ -158,7 +163,10 @@ impl TimeWiener {
                 break;
             }
             if cells[c].is_scattered() {
-                let sample = PilotSample { h: sym[c] / pilots[c], cum_shift };
+                let sample = PilotSample {
+                    h: sym[c] / pilots[c],
+                    cum_shift,
+                };
                 if self.seeded[p] {
                     hist.pop_back();
                     hist.push_front(sample);
@@ -194,7 +202,11 @@ impl TimeWiener {
             } else {
                 self.sigma = self.estimate_sigma();
                 let s_over = (self.sigma * SIGMA_OVERESTIMATION).min(self.sigma_max);
-                let snr = if self.snr_cnt > 0 { self.snr_acc / self.snr_cnt as Real } else { snr_pilots };
+                let snr = if self.snr_cnt > 0 {
+                    self.snr_acc / self.snr_cnt as Real
+                } else {
+                    snr_pilots
+                };
                 self.mmse = self.update_filters(snr.max(1.0), s_over);
                 if 1.0 / self.mmse < snr_pilots {
                     self.mmse = 1.0 / snr_pilots.max(1e-3);
@@ -212,7 +224,10 @@ impl TimeWiener {
     fn estimate_sigma(&self) -> Real {
         let m = SIGMA_TAPS.min(self.len);
         let w: Vec<Real> = (0..m).map(|i| ((i * self.t) as Real).powi(2)).collect();
-        let z: Vec<Real> = self.ticorr[..m].iter().map(|c| c.norm().max(1e-30).ln()).collect();
+        let z: Vec<Real> = self.ticorr[..m]
+            .iter()
+            .map(|c| c.norm().max(1e-30).ln())
+            .collect();
         let a1 = linear_regression_slope(&w, &z);
         let sigma = 0.5 / PI * (-2.0 * a1).max(0.0).sqrt() / self.ts;
         sigma.clamp(LOW_BOUND_SIGMA, self.sigma_max)

@@ -104,7 +104,10 @@ impl CellMap {
             for k in kmin..=kmax {
                 let idx = s as usize * num_carriers + (k - kmin) as usize;
                 let mut ty = CellType::MSC;
-                if fac.iter().any(|&(fs, fk)| i32::from(fs) == s && i32::from(fk) == k) {
+                if fac
+                    .iter()
+                    .any(|&(fs, fk)| i32::from(fs) == s && i32::from(fk) == k)
+                {
                     ty = CellType::FAC;
                 }
                 // Gain references; time/frequency references take precedence.
@@ -125,9 +128,14 @@ impl CellMap {
                     pilots[idx] = polar_1024(power.sqrt(), phase);
                 }
                 if s == 0
-                    && let Some(&(_, phase)) = time_pilots.iter().find(|&&(tk, _)| i32::from(tk) == k)
+                    && let Some(&(_, phase)) =
+                        time_pilots.iter().find(|&&(tk, _)| i32::from(tk) == k)
                 {
-                    ty = if ty.is_scattered() { ty | CellType::TIME_PILOT } else { CellType::TIME_PILOT };
+                    ty = if ty.is_scattered() {
+                        ty | CellType::TIME_PILOT
+                    } else {
+                        CellType::TIME_PILOT
+                    };
                     pilots[idx] = polar_1024(PILOT_POWER.sqrt(), i32::from(phase));
                 }
                 if let Some(pos) = freq_pilots.iter().position(|&(fk, _)| i32::from(fk) == k) {
@@ -246,10 +254,19 @@ mod tests {
     /// N_MUX per layout (phy.md §3.2, checked there against EasyDRF's streamlen table).
     #[test]
     fn msc_cells_per_frame() {
-        for (m, b, n) in [(A, Narrow, 647), (A, Wide, 704), (B, Narrow, 455), (B, Wide, 530), (E, Narrow, 339), (E, Wide, 369)] {
+        for (m, b, n) in [
+            (A, Narrow, 647),
+            (A, Wide, 704),
+            (B, Narrow, 455),
+            (B, Wide, 530),
+            (E, Narrow, 339),
+            (E, Wide, 369),
+        ] {
             let map = CellMap::new(Layout::new(m, b));
             assert_eq!(map.msc_cells_per_frame, n, "{}", map.layout);
-            let fac: usize = (0..map.symbols_per_frame).map(|s| map.fac_carriers(s).len()).sum();
+            let fac: usize = (0..map.symbols_per_frame)
+                .map(|s| map.fac_carriers(s).len())
+                .sum();
             assert_eq!(fac, NUM_FAC_CELLS);
         }
     }
@@ -259,15 +276,32 @@ mod tests {
     fn mode_e_symbol_counts() {
         let map = CellMap::new(Layout::new(E, Narrow));
         let got: Vec<usize> = (0..20).map(|s| map.msc_carriers(s).len()).collect();
-        assert_eq!(got, [13, 17, 17, 18, 17, 17, 18, 18, 16, 17, 17, 17, 17, 17, 17, 18, 16, 17, 17, 18]);
+        assert_eq!(
+            got,
+            [
+                13, 17, 17, 18, 17, 17, 18, 18, 16, 17, 17, 17, 17, 17, 17, 18, 16, 17, 17, 18
+            ]
+        );
     }
 
     /// rAvPowPerSymbol (phy.md §2.4).
     #[test]
     fn average_power() {
-        for (m, b, p) in [(A, Narrow, 61.0667), (A, Wide, 65.6667), (B, Narrow, 59.3333), (B, Wide, 66.3333), (E, Narrow, 39.8), (E, Wide, 42.3)] {
+        for (m, b, p) in [
+            (A, Narrow, 61.0667),
+            (A, Wide, 65.6667),
+            (B, Narrow, 59.3333),
+            (B, Wide, 66.3333),
+            (E, Narrow, 39.8),
+            (E, Wide, 42.3),
+        ] {
             let map = CellMap::new(Layout::new(m, b));
-            assert!((map.avg_power_per_symbol - p).abs() < 1e-3, "{} {}", map.layout, map.avg_power_per_symbol);
+            assert!(
+                (map.avg_power_per_symbol - p).abs() < 1e-3,
+                "{} {}",
+                map.layout,
+                map.avg_power_per_symbol
+            );
         }
     }
 }

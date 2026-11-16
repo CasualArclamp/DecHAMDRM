@@ -40,7 +40,10 @@ pub fn frames(files: &[OutFile], cfg: &SendConfig) -> Vec<Vec<u8>> {
     let objects: Vec<MotObject> = files.iter().map(|f| object_for(f, cfg.rs_level)).collect();
     let mut mot = MotEncoder::new(segment_size(cfg.packet_len));
     let mut pk = PacketEncoder::new(cfg.packet_len, cfg.packet_id);
-    mot.transmission(&objects, cfg.lead_in).iter().flat_map(|g| pk.encode(g)).collect()
+    mot.transmission(&objects, cfg.lead_in)
+        .iter()
+        .flat_map(|g| pk.encode(g))
+        .collect()
 }
 
 #[cfg(test)]
@@ -53,8 +56,16 @@ mod tests {
     fn frames_decode_back_to_the_file() {
         let data: Vec<u8> = (0..3000u32).map(|i| (i % 255) as u8).collect();
         for rs in [0, 2] {
-            let cfg = SendConfig { packet_len: 127, packet_id: 0, rs_level: rs, lead_in: 9 };
-            let f = OutFile { name: "photo.jpg".into(), data: data.clone() };
+            let cfg = SendConfig {
+                packet_len: 127,
+                packet_id: 0,
+                rs_level: rs,
+                lead_in: 9,
+            };
+            let f = OutFile {
+                name: "photo.jpg".into(),
+                data: data.clone(),
+            };
             let mut pd = PacketDecoder::default();
             let mut md = MotDecoder::default();
             let mut tid = None;

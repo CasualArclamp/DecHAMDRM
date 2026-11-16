@@ -104,7 +104,11 @@ pub(super) struct SymbolChain {
 impl SymbolChain {
     pub fn new(layout: Layout, cfg: &ReceiverConfig) -> Self {
         let map = Arc::new(CellMap::new(layout));
-        let last_fac_symbol = crate::tables::fac_positions(layout.mode).iter().map(|&(s, _)| s as usize).max().unwrap_or(0);
+        let last_fac_symbol = crate::tables::fac_positions(layout.mode)
+            .iter()
+            .map(|&(s, _)| s as usize)
+            .max()
+            .unwrap_or(0);
         let mut fac_dec = MlcDecoder::new(MlcParams::fac(), 0);
         fac_dec.metric = cfg.metric;
         Self {
@@ -270,7 +274,10 @@ impl SymbolChain {
     fn remember(&mut self, win: &SymbolWindow, symbol: usize) {
         let keep = 2 * self.chanest.delay() + 1;
         let mut buf = if self.recent.len() >= keep {
-            self.recent.pop_front().map(|(b, _, _)| b).unwrap_or_default()
+            self.recent
+                .pop_front()
+                .map(|(b, _, _)| b)
+                .unwrap_or_default()
         } else {
             Vec::new()
         };
@@ -296,7 +303,10 @@ impl SymbolChain {
             Vec::new()
         };
         row.clear();
-        row.extend(chan.iter().map(|h| (10.0 * h.norm_sqr().max(1e-12).log10()) as f32));
+        row.extend(
+            chan.iter()
+                .map(|h| (10.0 * h.norm_sqr().max(1e-12).log10()) as f32),
+        );
         self.chan_rows.push_back(row);
         self.chan_seq += 1;
         self.vis.kmin = map.kmin;
@@ -359,7 +369,9 @@ impl SymbolChain {
         self.fac_cells.clear();
         let msc = (self.msc_collecting && self.msc_cells.len() == map.msc_cells_per_frame)
             .then(|| std::mem::take(&mut self.msc_cells));
-        let gap = if msc.is_some() { std::mem::replace(&mut self.msc_gap, false) } else {
+        let gap = if msc.is_some() {
+            std::mem::replace(&mut self.msc_gap, false)
+        } else {
             self.msc_gap = true;
             true
         };

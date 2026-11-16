@@ -154,7 +154,11 @@ impl Fac {
             _ => 0,
         };
         let bandwidth = Bandwidth::from_bit(r.read_bool());
-        let interleave = if r.read_bool() { Interleave::Short } else { Interleave::Long };
+        let interleave = if r.read_bool() {
+            Interleave::Short
+        } else {
+            Interleave::Long
+        };
         let msc16 = r.read_bool();
         let protection = r.read(1) as u8;
         let is_data = r.read_bool();
@@ -167,9 +171,20 @@ impl Fac {
         let f31 = r.read_bool();
         // EasyDRF FAC.cpp:756-762: the 4-QAM flag wins over the MSC-mode bit.
         let (service, qam4) = if is_data {
-            (Service::Data { packet_id: f78 as u8 }, f9)
+            (
+                Service::Data {
+                    packet_id: f78 as u8,
+                },
+                f9,
+            )
         } else {
-            (Service::Audio { coding: AudioCoding::from_bits(f78), text: f9 }, f31)
+            (
+                Service::Audio {
+                    coding: AudioCoding::from_bits(f78),
+                    text: f9,
+                },
+                f31,
+            )
         };
         let qam = if qam4 {
             Qam::Qam4
@@ -178,7 +193,15 @@ impl Fac {
         } else {
             Qam::Qam64
         };
-        Some(Self { frame, bandwidth, interleave, qam, protection, service, label })
+        Some(Self {
+            frame,
+            bandwidth,
+            interleave,
+            qam,
+            protection,
+            service,
+            label,
+        })
     }
 }
 
@@ -212,7 +235,14 @@ impl LabelAssembler {
         if !self.seen.iter().all(|&s| s) {
             return None;
         }
-        Some(self.parts.iter().flatten().filter(|&&c| c != 0).map(|&c| c as char).collect())
+        Some(
+            self.parts
+                .iter()
+                .flatten()
+                .filter(|&&c| c != 0)
+                .map(|&c| c as char)
+                .collect(),
+        )
     }
 }
 
@@ -225,7 +255,10 @@ mod tests {
         for qam in Qam::ALL {
             for service in [
                 Service::Data { packet_id: 2 },
-                Service::Audio { coding: AudioCoding::Speex, text: true },
+                Service::Audio {
+                    coding: AudioCoding::Speex,
+                    text: true,
+                },
             ] {
                 for frame in 0..3 {
                     let f = Fac {

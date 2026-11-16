@@ -25,12 +25,19 @@ pub fn transport_id(name: &[u8]) -> u16 {
         a ^= i as u8;
     }
     let tid = 256 * u16::from(a) + u16::from(x);
-    if tid <= 2 { tid + name.len() as u16 } else { tid }
+    if tid <= 2 {
+        tid + name.len() as u16
+    } else {
+        tid
+    }
 }
 
 /// File name bytes: Latin-1 (QSSTV decodes it so; EasyDRF writes ANSI bytes).
 pub fn name_bytes(name: &str) -> Vec<u8> {
-    name.chars().map(|c| if (c as u32) < 256 { c as u8 } else { b'_' }).take(MAX_NAME).collect()
+    name.chars()
+        .map(|c| if (c as u32) < 256 { c as u8 } else { b'_' })
+        .take(MAX_NAME)
+        .collect()
 }
 
 pub fn name_from_bytes(b: &[u8]) -> String {
@@ -59,7 +66,9 @@ impl DataGroup {
         let mut b = Vec::with_capacity(self.data.len() + 11);
         b.push(0b0111_0000 | (self.kind & 15));
         b.push(((self.ci & 15) << 4) | (self.rep_idx & 15));
-        b.extend_from_slice(&((u16::from(self.last) << 15) | (self.segment & 0x7FFF)).to_be_bytes());
+        b.extend_from_slice(
+            &((u16::from(self.last) << 15) | (self.segment & 0x7FFF)).to_be_bytes(),
+        );
         b.push(((self.rfa & 7) << 5) | 0b1_0010);
         b.extend_from_slice(&self.tid.to_be_bytes());
         b.extend_from_slice(&((self.data.len() as u16) & 0x1FFF).to_be_bytes());
@@ -168,7 +177,8 @@ pub fn parse_header(h: &[u8]) -> Option<MotHeader> {
             2 => 4,
             _ => {
                 let ext = h.get(p)? & 0x80 != 0;
-                let l = if ext {
+
+                if ext {
                     let v = (usize::from(*h.get(p)? & 0x7F) << 8) | usize::from(*h.get(p + 1)?);
                     p += 2;
                     v
@@ -176,8 +186,7 @@ pub fn parse_header(h: &[u8]) -> Option<MotHeader> {
                     let v = usize::from(*h.get(p)? & 0x7F);
                     p += 1;
                     v
-                };
-                l
+                }
             }
         };
         let field = h.get(p..p + len)?;
@@ -216,12 +225,31 @@ pub struct MotEncoder {
 
 impl MotEncoder {
     pub fn new(segment_size: usize) -> Self {
-        Self { segment_size, ci: [0; 2] }
+        Self {
+            segment_size,
+            ci: [0; 2],
+        }
     }
 
-    fn group(&mut self, kind: u8, obj: &MotObject, segment: u16, last: bool, data: &[u8]) -> Vec<u8> {
+    fn group(
+        &mut self,
+        kind: u8,
+        obj: &MotObject,
+        segment: u16,
+        last: bool,
+        data: &[u8],
+    ) -> Vec<u8> {
         let c = &mut self.ci[usize::from(kind == 4)];
-        let g = DataGroup { kind, ci: *c, rep_idx: 0, last, segment, rfa: 0, tid: obj.tid, data: data.to_vec() };
+        let g = DataGroup {
+            kind,
+            ci: *c,
+            rep_idx: 0,
+            last,
+            segment,
+            rfa: 0,
+            tid: obj.tid,
+            data: data.to_vec(),
+        };
         *c = (*c + 1) & 15;
         g.encode()
     }
@@ -294,7 +322,9 @@ impl RxObject {
 
     pub fn missing(&self) -> Vec<usize> {
         let n = self.total.unwrap_or(self.segments.len());
-        (0..n).filter(|&i| self.segments.get(i).is_none_or(|s| s.is_none())).collect()
+        (0..n)
+            .filter(|&i| self.segments.get(i).is_none_or(|s| s.is_none()))
+            .collect()
     }
 
     pub fn is_complete(&self) -> bool {
@@ -352,7 +382,10 @@ impl MotDecoder {
                 if self.pool.len() == POOL {
                     self.pool.remove(0);
                 }
-                self.pool.push(RxObject { tid: g.tid, ..Default::default() });
+                self.pool.push(RxObject {
+                    tid: g.tid,
+                    ..Default::default()
+                });
                 self.pool.len() - 1
             }
         };
@@ -369,7 +402,11 @@ impl MotDecoder {
             if !g.last {
                 if o.segment_size.is_some_and(|s| s != g.data.len()) {
                     // Segment size changed (new mode): start over.
-                    o = RxObject { tid: g.tid, header: o.header.take(), ..Default::default() };
+                    o = RxObject {
+                        tid: g.tid,
+                        header: o.header.take(),
+                        ..Default::default()
+                    };
                 }
                 o.segment_size = Some(g.data.len());
             }
@@ -409,7 +446,10 @@ mod tests {
         let h = encode_header(12345, b"picture.jpg", 2, 1);
         assert_eq!(h.len(), 17 + 11);
         let p = parse_header(&h).unwrap();
-        assert_eq!((p.body_size, p.content_type, p.sub_type, p.name.as_slice()), (12345, 2, 1, &b"picture.jpg"[..]));
+        assert_eq!(
+            (p.body_size, p.content_type, p.sub_type, p.name.as_slice()),
+            (12345, 2, 1, &b"picture.jpg"[..])
+        );
     }
 
     #[test]

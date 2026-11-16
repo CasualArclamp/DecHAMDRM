@@ -9,8 +9,8 @@
 //! (127 taps, enough for a 12 kHz IF): 511 taps at 48 kHz reach full gain above
 //! ~200 Hz, which keeps the negative-frequency image of the carriers > 60 dB down.
 
-use decdrm_core::dsp::fir::AnalyticConverter;
 use crate::{Cplx, Real};
+use decdrm_core::dsp::fir::AnalyticConverter;
 
 /// Hilbert transformer length (odd). See the module docs.
 const HILBERT_TAPS: usize = 511;
@@ -59,7 +59,11 @@ impl InputConverter {
         // A closure capturing `interleaved`; a missing channel (mono input with
         // `Right` selected) falls back to channel 0.
         let sample = |f: usize, c: usize| -> Real {
-            if c < ch { Real::from(interleaved[f * ch + c]) } else { Real::from(interleaved[f * ch]) }
+            if c < ch {
+                Real::from(interleaved[f * ch + c])
+            } else {
+                Real::from(interleaved[f * ch])
+            }
         };
         self.real_buf.clear();
         for f in 0..frames {

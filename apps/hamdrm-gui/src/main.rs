@@ -12,13 +12,13 @@ mod prefs;
 mod theme;
 
 use eframe::egui::{
-    self, Align2, Color32, ColorImage, FontId, Frame, Margin, RichText, Sense, Stroke, TextureHandle,
-    TextureOptions, Ui, pos2, vec2,
+    self, Align2, Color32, ColorImage, FontId, Frame, Margin, RichText, Sense, Stroke,
+    TextureHandle, TextureOptions, Ui, pos2, vec2,
 };
 use hamdrm_engine::decdsss_rig::{self, Method, Model};
 use hamdrm_engine::{
-    Bandwidth, Command, Engine, Input, Interleave, Layout, Mode, MscConfig, Options, PttConfig, Qam,
-    ReceiverConfig, RxState, TxSettings, View,
+    Bandwidth, Command, Engine, Input, Interleave, Layout, Mode, MscConfig, Options, PttConfig,
+    Qam, ReceiverConfig, RxState, TxSettings, View,
 };
 use prefs::Prefs;
 use std::collections::HashMap;
@@ -72,7 +72,11 @@ impl App {
                 layout: Layout::new(p.mode, p.bandwidth),
                 qam: p.qam,
                 protection: p.protection,
-                interleave: if p.long { Interleave::Long } else { Interleave::Short },
+                interleave: if p.long {
+                    Interleave::Long
+                } else {
+                    Interleave::Short
+                },
             },
             call: p.call.clone(),
             rs: p.rs,
@@ -94,7 +98,8 @@ impl App {
             return;
         }
         // Scroll down by `take` rows, newest at the top.
-        self.wf_pixels.copy_within(0..(WF_ROWS - take) * WF_COLS, take * WF_COLS);
+        self.wf_pixels
+            .copy_within(0..(WF_ROWS - take) * WF_COLS, take * WF_COLS);
         let bin = self.view.waterfall_bin_hz.max(1.0);
         // Auto level: the noise floor (20th percentile of the newest row) tracks slowly.
         if let Some(row) = self.view.waterfall.back() {
@@ -102,7 +107,11 @@ impl App {
             if !v.is_empty() {
                 v.sort_by(f32::total_cmp);
                 let floor = f64::from(v[v.len() / 5]);
-                self.wf_floor = if self.wf_floor < -200.0 { floor } else { self.wf_floor + 0.05 * (floor - self.wf_floor) };
+                self.wf_floor = if self.wf_floor < -200.0 {
+                    floor
+                } else {
+                    self.wf_floor + 0.05 * (floor - self.wf_floor)
+                };
             }
         }
         for i in 0..take {
@@ -122,14 +131,21 @@ impl App {
         }
     }
 
-    fn image(&mut self, ctx: &egui::Context, path: &PathBuf) -> Option<(TextureHandle, [usize; 2])> {
+    fn image(
+        &mut self,
+        ctx: &egui::Context,
+        path: &PathBuf,
+    ) -> Option<(TextureHandle, [usize; 2])> {
         self.images
             .entry(path.clone())
             .or_insert_with(|| {
                 let img = image::open(path).ok()?.to_rgba8();
                 let size = [img.width() as usize, img.height() as usize];
                 let ci = ColorImage::from_rgba_unmultiplied(size, img.as_raw());
-                Some((ctx.load_texture(path.display().to_string(), ci, TextureOptions::LINEAR), size))
+                Some((
+                    ctx.load_texture(path.display().to_string(), ci, TextureOptions::LINEAR),
+                    size,
+                ))
             })
             .clone()
     }
@@ -144,7 +160,13 @@ impl App {
         });
         if let Some(image) = image {
             let rgba: Vec<u8> = image.pixels.iter().flat_map(|c| c.to_array()).collect();
-            match image::save_buffer(&shot.path, &rgba, image.size[0] as u32, image.size[1] as u32, image::ColorType::Rgba8) {
+            match image::save_buffer(
+                &shot.path,
+                &rgba,
+                image.size[0] as u32,
+                image.size[1] as u32,
+                image::ColorType::Rgba8,
+            ) {
                 Ok(()) => eprintln!("screenshot saved to {}", shot.path.display()),
                 Err(e) => eprintln!("cannot save {}: {e}", shot.path.display()),
             }
@@ -188,12 +210,23 @@ impl App {
                 }
                 let ptt = match &self.view.ptt {
                     Some(s) if self.prefs.ptt.keys() => {
-                        format!("PTT {} {}", self.prefs.ptt.method.label(), if s.keyed { "· keyed" } else { "" })
+                        format!(
+                            "PTT {} {}",
+                            self.prefs.ptt.method.label(),
+                            if s.keyed { "· keyed" } else { "" }
+                        )
                     }
                     _ => "PTT: VOX".into(),
                 };
                 ui.label(RichText::new(ptt).color(DIM));
-                ui.label(RichText::new(format!("in: {}  out: {}", short(&self.view.input_name), short(&self.view.output_name))).color(FAINT));
+                ui.label(
+                    RichText::new(format!(
+                        "in: {}  out: {}",
+                        short(&self.view.input_name),
+                        short(&self.view.output_name)
+                    ))
+                    .color(FAINT),
+                );
             });
         });
         if let Some(e) = &self.view.input_error {
@@ -213,19 +246,51 @@ impl App {
             led(ui, "MSC", st.msc.is_some() && st.state == RxState::Locked);
         });
         ui.add_space(4.0);
-        egui::Grid::new("rxfig").num_columns(2).spacing([10.0, 3.0]).show(ui, |ui| {
-            let fmt = |v: Option<f64>, u: &str| v.map_or("—".to_string(), |v| format!("{v:.1} {u}"));
-            row(ui, "Mode", st.msc.map_or_else(|| st.mode.map_or("—".into(), |m| format!("{m}")), |m| m.to_string()));
-            row(ui, "Station", st.label.clone().unwrap_or_else(|| "—".into()));
-            row(ui, "SNR", fmt(st.snr_db, "dB"));
-            row(ui, "MER / WMER", format!("{} / {}", fmt(st.mer_db, ""), fmt(st.wmer_db, "dB")));
-            row(ui, "DC carrier", fmt(st.dc_frequency_hz, "Hz"));
-            row(ui, "Doppler / delay", format!("{:.2} Hz / {:.2} ms", st.doppler_hz, st.delay_ms));
-            row(ui, "Clock offset", format!("{:.1} Hz", st.sro_hz));
-            row(ui, "FAC ok / bad", format!("{} / {}", st.fac_ok, st.fac_bad));
-            row(ui, "MSC ok / doubtful", format!("{} / {}", st.msc_ok, st.msc_doubtful));
-            row(ui, "Packet CRC errors", self.view.crc_errors.to_string());
-        });
+        egui::Grid::new("rxfig")
+            .num_columns(2)
+            .spacing([10.0, 3.0])
+            .show(ui, |ui| {
+                let fmt = |v: Option<f64>, u: &str| {
+                    v.map_or("—".to_string(), |v| format!("{v:.1} {u}"))
+                };
+                row(
+                    ui,
+                    "Mode",
+                    st.msc.map_or_else(
+                        || st.mode.map_or("—".into(), |m| format!("{m}")),
+                        |m| m.to_string(),
+                    ),
+                );
+                row(
+                    ui,
+                    "Station",
+                    st.label.clone().unwrap_or_else(|| "—".into()),
+                );
+                row(ui, "SNR", fmt(st.snr_db, "dB"));
+                row(
+                    ui,
+                    "MER / WMER",
+                    format!("{} / {}", fmt(st.mer_db, ""), fmt(st.wmer_db, "dB")),
+                );
+                row(ui, "DC carrier", fmt(st.dc_frequency_hz, "Hz"));
+                row(
+                    ui,
+                    "Doppler / delay",
+                    format!("{:.2} Hz / {:.2} ms", st.doppler_hz, st.delay_ms),
+                );
+                row(ui, "Clock offset", format!("{:.1} Hz", st.sro_hz));
+                row(
+                    ui,
+                    "FAC ok / bad",
+                    format!("{} / {}", st.fac_ok, st.fac_bad),
+                );
+                row(
+                    ui,
+                    "MSC ok / doubtful",
+                    format!("{} / {}", st.msc_ok, st.msc_doubtful),
+                );
+                row(ui, "Packet CRC errors", self.view.crc_errors.to_string());
+            });
         ui.add_space(6.0);
         self.constellation(ui);
         ui.add_space(6.0);
@@ -236,11 +301,24 @@ impl App {
             ui.label(RichText::new("nothing yet").color(FAINT));
         }
         for o in objs.iter().take(3) {
-            let name = o.name.clone().unwrap_or_else(|| format!("transport {}", o.tid));
+            let name = o
+                .name
+                .clone()
+                .unwrap_or_else(|| format!("transport {}", o.tid));
             let total = o.total.map_or("?".into(), |t| t.to_string());
-            ui.label(RichText::new(format!("{name}  {}/{total}{}", o.received, if o.done { "  ✔" } else { "" })).color(TEXT));
+            ui.label(
+                RichText::new(format!(
+                    "{name}  {}/{total}{}",
+                    o.received,
+                    if o.done { "  ✔" } else { "" }
+                ))
+                .color(TEXT),
+            );
             segment_strip(ui, &o.segments, o.done);
-            if !o.done && o.total.is_some() && ui.small_button("Send BSR (ask for missing)").clicked() {
+            if !o.done
+                && o.total.is_some()
+                && ui.small_button("Send BSR (ask for missing)").clicked()
+            {
                 self.engine.send(Command::SendBsr(o.tid, self.settings()));
             }
             ui.add_space(4.0);
@@ -252,11 +330,26 @@ impl App {
         let (rect, _) = ui.allocate_exact_size(vec2(w, w), Sense::hover());
         let p = ui.painter_at(rect);
         p.rect_filled(rect, 4.0, WELL);
-        p.line_segment([pos2(rect.center().x, rect.top()), pos2(rect.center().x, rect.bottom())], Stroke::new(1.0, AXIS));
-        p.line_segment([pos2(rect.left(), rect.center().y), pos2(rect.right(), rect.center().y)], Stroke::new(1.0, AXIS));
+        p.line_segment(
+            [
+                pos2(rect.center().x, rect.top()),
+                pos2(rect.center().x, rect.bottom()),
+            ],
+            Stroke::new(1.0, AXIS),
+        );
+        p.line_segment(
+            [
+                pos2(rect.left(), rect.center().y),
+                pos2(rect.right(), rect.center().y),
+            ],
+            Stroke::new(1.0, AXIS),
+        );
         let scale = w as f64 / 2.0 / 1.5;
         for c in &self.view.msc_constellation {
-            let q = pos2(rect.center().x + (c.re * scale) as f32, rect.center().y - (c.im * scale) as f32);
+            let q = pos2(
+                rect.center().x + (c.re * scale) as f32,
+                rect.center().y - (c.im * scale) as f32,
+            );
             if rect.contains(q) {
                 self.trail.push_back(q);
             }
@@ -267,7 +360,13 @@ impl App {
         for q in &self.trail {
             p.circle_filled(*q, 1.2, DOT);
         }
-        p.text(rect.left_top() + vec2(6.0, 4.0), Align2::LEFT_TOP, "MSC", FontId::proportional(11.0), DIM);
+        p.text(
+            rect.left_top() + vec2(6.0, 4.0),
+            Align2::LEFT_TOP,
+            "MSC",
+            FontId::proportional(11.0),
+            DIM,
+        );
     }
 
     // ---------------------------------------------------------------- band
@@ -281,14 +380,27 @@ impl App {
         let x_of = |hz: f64| rect.left() + (hz / 3500.0) as f32 * w;
         // Signal band
         if let Some((a, b)) = self.view.signal_band_hz {
-            p.rect_filled(egui::Rect::from_x_y_ranges(x_of(a)..=x_of(b), rect.y_range()), 0.0, Color32::from_rgba_unmultiplied(80, 200, 255, 18));
+            p.rect_filled(
+                egui::Rect::from_x_y_ranges(x_of(a)..=x_of(b), rect.y_range()),
+                0.0,
+                Color32::from_rgba_unmultiplied(80, 200, 255, 18),
+            );
         }
         // Grid
         for k in 0..=7 {
             let hz = k as f64 * 500.0;
             let x = x_of(hz);
-            p.line_segment([pos2(x, spec.top()), pos2(x, spec.bottom())], Stroke::new(1.0, GRID));
-            p.text(pos2(x + 2.0, spec.bottom() - 2.0), Align2::LEFT_BOTTOM, format!("{hz:.0}"), FontId::proportional(10.0), FAINT);
+            p.line_segment(
+                [pos2(x, spec.top()), pos2(x, spec.bottom())],
+                Stroke::new(1.0, GRID),
+            );
+            p.text(
+                pos2(x + 2.0, spec.bottom() - 2.0),
+                Align2::LEFT_BOTTOM,
+                format!("{hz:.0}"),
+                FontId::proportional(10.0),
+                FAINT,
+            );
         }
         // Spectrum trace
         let s = &self.view.spectrum_db;
@@ -299,7 +411,9 @@ impl App {
                 .enumerate()
                 .filter(|(i, _)| (*i as f64 * self.view.spectrum_bin_hz) <= 3500.0)
                 .map(|(i, &db)| {
-                    let y = spec.top() + 6.0 + ((max - db) / 60.0).clamp(0.0, 1.0) as f32 * (spec_h - 18.0);
+                    let y = spec.top()
+                        + 6.0
+                        + ((max - db) / 60.0).clamp(0.0, 1.0) as f32 * (spec_h - 18.0);
                     pos2(x_of(i as f64 * self.view.spectrum_bin_hz), y)
                 })
                 .collect();
@@ -307,19 +421,35 @@ impl App {
         }
         if let Some(dc) = self.view.dc_hz {
             let x = x_of(dc);
-            p.line_segment([pos2(x, spec.top()), pos2(x, spec.bottom())], Stroke::new(1.0, VFO));
-            p.text(pos2(x + 3.0, spec.top() + 2.0), Align2::LEFT_TOP, format!("DC {dc:.0}"), FontId::proportional(10.0), VFO);
+            p.line_segment(
+                [pos2(x, spec.top()), pos2(x, spec.bottom())],
+                Stroke::new(1.0, VFO),
+            );
+            p.text(
+                pos2(x + 3.0, spec.top() + 2.0),
+                Align2::LEFT_TOP,
+                format!("DC {dc:.0}"),
+                FontId::proportional(10.0),
+                VFO,
+            );
         }
         // Waterfall
         if let Some(t) = &self.wf_tex {
             let wf = egui::Rect::from_min_max(pos2(rect.left(), spec.bottom()), rect.max);
-            p.image(t.id(), wf, egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)), Color32::WHITE);
+            p.image(
+                t.id(),
+                wf,
+                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                Color32::WHITE,
+            );
         }
     }
 
     fn viewer(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         let Some(path) = self.viewing.clone() else {
-            ui.centered_and_justified(|ui| ui.label(RichText::new("Received pictures appear here").color(FAINT)));
+            ui.centered_and_justified(|ui| {
+                ui.label(RichText::new("Received pictures appear here").color(FAINT))
+            });
             return;
         };
         let info = self.view.files.iter().find(|f| f.path == path).cloned();
@@ -341,12 +471,16 @@ impl App {
         match self.image(ctx, &path) {
             Some((tex, size)) => {
                 let avail = ui.available_size();
-                let s = (avail.x / size[0] as f32).min(avail.y / size[1] as f32).min(4.0);
+                let s = (avail.x / size[0] as f32)
+                    .min(avail.y / size[1] as f32)
+                    .min(4.0);
                 let sz = vec2(size[0] as f32 * s, size[1] as f32 * s);
                 ui.centered_and_justified(|ui| ui.add(egui::Image::new((tex.id(), sz))));
             }
             None => {
-                ui.label(RichText::new("not a picture this build can show (saved to disk)").color(DIM));
+                ui.label(
+                    RichText::new("not a picture this build can show (saved to disk)").color(DIM),
+                );
             }
         }
     }
@@ -355,51 +489,65 @@ impl App {
     fn transmit(&mut self, ui: &mut Ui) {
         heading(ui, "Transmit");
         let busy = self.view.tx.is_some();
-        egui::Grid::new("txset").num_columns(2).spacing([8.0, 4.0]).show(ui, |ui| {
-            ui.label("Callsign");
-            ui.add(egui::TextEdit::singleline(&mut self.prefs.call).char_limit(9).desired_width(110.0));
-            ui.end_row();
-            ui.label("Mode");
-            ui.horizontal(|ui| {
-                for m in Mode::ALL {
-                    ui.selectable_value(&mut self.prefs.mode, m, m.to_string());
-                }
+        egui::Grid::new("txset")
+            .num_columns(2)
+            .spacing([8.0, 4.0])
+            .show(ui, |ui| {
+                ui.label("Callsign");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.prefs.call)
+                        .char_limit(9)
+                        .desired_width(110.0),
+                );
+                ui.end_row();
+                ui.label("Mode");
+                ui.horizontal(|ui| {
+                    for m in Mode::ALL {
+                        ui.selectable_value(&mut self.prefs.mode, m, m.to_string());
+                    }
+                });
+                ui.end_row();
+                ui.label("Bandwidth");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.prefs.bandwidth, Bandwidth::Narrow, "2.3 kHz");
+                    ui.selectable_value(&mut self.prefs.bandwidth, Bandwidth::Wide, "2.5 kHz");
+                });
+                ui.end_row();
+                ui.label("QAM");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.prefs.qam, Qam::Qam4, "4");
+                    ui.selectable_value(&mut self.prefs.qam, Qam::Qam16, "16");
+                    ui.selectable_value(&mut self.prefs.qam, Qam::Qam64, "64");
+                });
+                ui.end_row();
+                ui.label("Protection");
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.prefs.protection, 0, "normal");
+                    ui.selectable_value(&mut self.prefs.protection, 1, "low");
+                    ui.checkbox(&mut self.prefs.long, "long interleave");
+                });
+                ui.end_row();
+                ui.label("Reed–Solomon");
+                ui.horizontal(|ui| {
+                    for (v, t) in [(0u8, "off"), (1, "1"), (2, "2"), (3, "3"), (4, "4")] {
+                        ui.selectable_value(&mut self.prefs.rs, v, t);
+                    }
+                });
+                ui.end_row();
+                ui.label("Lead-in");
+                ui.add(egui::Slider::new(&mut self.prefs.lead_in, 0..=24).suffix(" seg"));
+                ui.end_row();
             });
-            ui.end_row();
-            ui.label("Bandwidth");
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.prefs.bandwidth, Bandwidth::Narrow, "2.3 kHz");
-                ui.selectable_value(&mut self.prefs.bandwidth, Bandwidth::Wide, "2.5 kHz");
-            });
-            ui.end_row();
-            ui.label("QAM");
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.prefs.qam, Qam::Qam4, "4");
-                ui.selectable_value(&mut self.prefs.qam, Qam::Qam16, "16");
-                ui.selectable_value(&mut self.prefs.qam, Qam::Qam64, "64");
-            });
-            ui.end_row();
-            ui.label("Protection");
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.prefs.protection, 0, "normal");
-                ui.selectable_value(&mut self.prefs.protection, 1, "low");
-                ui.checkbox(&mut self.prefs.long, "long interleave");
-            });
-            ui.end_row();
-            ui.label("Reed–Solomon");
-            ui.horizontal(|ui| {
-                for (v, t) in [(0u8, "off"), (1, "1"), (2, "2"), (3, "3"), (4, "4")] {
-                    ui.selectable_value(&mut self.prefs.rs, v, t);
-                }
-            });
-            ui.end_row();
-            ui.label("Lead-in");
-            ui.add(egui::Slider::new(&mut self.prefs.lead_in, 0..=24).suffix(" seg"));
-            ui.end_row();
-        });
         let s = self.settings();
         let bytes = hamdrm_engine::frame_bytes(&s.msc);
-        ui.label(RichText::new(format!("{} bytes / 400 ms  ≈ {:.0} bit/s", bytes, (bytes - 14) as f64 * 8.0 / 0.4)).color(DIM));
+        ui.label(
+            RichText::new(format!(
+                "{} bytes / 400 ms  ≈ {:.0} bit/s",
+                bytes,
+                (bytes - 14) as f64 * 8.0 / 0.4
+            ))
+            .color(DIM),
+        );
         ui.add_space(4.0);
         ui.horizontal(|ui| {
             if ui.button("Add files…").clicked()
@@ -414,15 +562,23 @@ impl App {
         for q in &self.queue {
             let size = std::fs::metadata(q).map(|m| m.len()).unwrap_or(0);
             let secs = hamdrm_engine::estimate_seconds(&s, size as usize);
-            ui.label(RichText::new(format!("{}  {} B  ~{secs:.0} s", file_label(q), size)).color(TEXT));
+            ui.label(
+                RichText::new(format!("{}  {} B  ~{secs:.0} s", file_label(q), size)).color(TEXT),
+            );
         }
         if self.queue.is_empty() {
             ui.label(RichText::new("drop files here or add them").color(FAINT));
         }
         ui.horizontal(|ui| {
-            let send = ui.add_enabled(!busy && !self.queue.is_empty(), egui::Button::new(RichText::new("Send").strong()));
+            let send = ui.add_enabled(
+                !busy && !self.queue.is_empty(),
+                egui::Button::new(RichText::new("Send").strong()),
+            );
             if send.clicked() {
-                self.engine.send(Command::SendFiles(std::mem::take(&mut self.queue), s.clone()));
+                self.engine.send(Command::SendFiles(
+                    std::mem::take(&mut self.queue),
+                    s.clone(),
+                ));
             }
             if ui.add_enabled(busy, egui::Button::new("Stop")).clicked() {
                 self.engine.send(Command::StopTx);
@@ -433,34 +589,66 @@ impl App {
             }
         });
         ui.horizontal(|ui| {
-            ui.add(egui::TextEdit::singleline(&mut self.id_text).desired_width(120.0).hint_text("waterfall text"));
+            ui.add(
+                egui::TextEdit::singleline(&mut self.id_text)
+                    .desired_width(120.0)
+                    .hint_text("waterfall text"),
+            );
             if ui.add_enabled(!busy, egui::Button::new("ID")).clicked() {
-                let t = if self.id_text.trim().is_empty() { self.prefs.call.clone() } else { self.id_text.clone() };
+                let t = if self.id_text.trim().is_empty() {
+                    self.prefs.call.clone()
+                } else {
+                    self.id_text.clone()
+                };
                 self.engine.send(Command::SendWaterfall(t, s.clone()));
             }
         });
         if let Some(t) = &self.view.tx {
             ui.label(RichText::new(&t.what).color(BAD));
             if t.total_s > 0.0 {
-                ui.add(egui::ProgressBar::new((t.done_s / t.total_s) as f32).text(format!("{:.0} / {:.0} s", t.done_s, t.total_s)));
+                ui.add(
+                    egui::ProgressBar::new((t.done_s / t.total_s) as f32)
+                        .text(format!("{:.0} / {:.0} s", t.done_s, t.total_s)),
+                );
             }
         }
         // BSR requests
         if !self.view.bsrs.is_empty() {
             ui.add_space(6.0);
             heading(ui, "Repeat requests");
-            for b in self.view.bsrs.iter().rev().take(4).cloned().collect::<Vec<_>>() {
+            for b in self
+                .view
+                .bsrs
+                .iter()
+                .rev()
+                .take(4)
+                .cloned()
+                .collect::<Vec<_>>()
+            {
                 ui.horizontal(|ui| {
                     let who = b.from.clone().unwrap_or_else(|| "?".into());
                     match &b.ours {
                         Some(n) => {
-                            ui.label(RichText::new(format!("{who}: {} seg of {n}", b.request.missing.len())).color(TEXT));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{who}: {} seg of {n}",
+                                    b.request.missing.len()
+                                ))
+                                .color(TEXT),
+                            );
                             if ui.add_enabled(!busy, egui::Button::new("Repair")).clicked() {
-                                self.engine.send(Command::SendRepair(b.request.clone(), self.settings()));
+                                self.engine
+                                    .send(Command::SendRepair(b.request.clone(), self.settings()));
                             }
                         }
                         None => {
-                            ui.label(RichText::new(format!("{who}: {} seg, not ours", b.request.missing.len())).color(FAINT));
+                            ui.label(
+                                RichText::new(format!(
+                                    "{who}: {} seg, not ours",
+                                    b.request.missing.len()
+                                ))
+                                .color(FAINT),
+                            );
                         }
                     }
                 });
@@ -474,114 +662,202 @@ impl App {
         if files.is_empty() {
             ui.label(RichText::new("no files yet").color(FAINT));
         }
-        egui::ScrollArea::vertical().id_salt("gallery").max_height(260.0).show(ui, |ui| {
-            for f in files.iter().rev() {
-                let selected = self.viewing.as_ref() == Some(&f.path);
-                let resp = ui
-                    .horizontal(|ui| {
-                        if let Some((tex, size)) = self.image(ctx, &f.path) {
-                            let s = 40.0 / size[0].max(size[1]) as f32;
-                            ui.add(egui::Image::new((tex.id(), vec2(size[0] as f32 * s, size[1] as f32 * s))));
-                        } else {
-                            ui.add_sized([40.0, 40.0], egui::Label::new(RichText::new("file").color(FAINT)));
-                        }
-                        ui.vertical(|ui| {
-                            ui.label(RichText::new(&f.name).color(if selected { WHITE } else { TEXT }));
-                            ui.label(RichText::new(format!("{}  {} B", f.from.as_deref().unwrap_or(""), f.bytes)).color(DIM).size(11.0));
-                        });
-                    })
-                    .response
-                    .interact(Sense::click());
-                if resp.clicked() {
-                    self.viewing = Some(f.path.clone());
+        egui::ScrollArea::vertical()
+            .id_salt("gallery")
+            .max_height(260.0)
+            .show(ui, |ui| {
+                for f in files.iter().rev() {
+                    let selected = self.viewing.as_ref() == Some(&f.path);
+                    let resp = ui
+                        .horizontal(|ui| {
+                            if let Some((tex, size)) = self.image(ctx, &f.path) {
+                                let s = 40.0 / size[0].max(size[1]) as f32;
+                                ui.add(egui::Image::new((
+                                    tex.id(),
+                                    vec2(size[0] as f32 * s, size[1] as f32 * s),
+                                )));
+                            } else {
+                                ui.add_sized(
+                                    [40.0, 40.0],
+                                    egui::Label::new(RichText::new("file").color(FAINT)),
+                                );
+                            }
+                            ui.vertical(|ui| {
+                                ui.label(RichText::new(&f.name).color(if selected {
+                                    WHITE
+                                } else {
+                                    TEXT
+                                }));
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{}  {} B",
+                                        f.from.as_deref().unwrap_or(""),
+                                        f.bytes
+                                    ))
+                                    .color(DIM)
+                                    .size(11.0),
+                                );
+                            });
+                        })
+                        .response
+                        .interact(Sense::click());
+                    if resp.clicked() {
+                        self.viewing = Some(f.path.clone());
+                    }
                 }
-            }
-        });
+            });
     }
 
     fn log(&self, ui: &mut Ui) {
         heading(ui, "Log");
-        egui::ScrollArea::vertical().id_salt("log").stick_to_bottom(true).show(ui, |ui| {
-            for l in &self.view.log {
-                ui.label(RichText::new(l).color(DIM).size(11.0).monospace());
-            }
-        });
+        egui::ScrollArea::vertical()
+            .id_salt("log")
+            .stick_to_bottom(true)
+            .show(ui, |ui| {
+                for l in &self.view.log {
+                    ui.label(RichText::new(l).color(DIM).size(11.0).monospace());
+                }
+            });
     }
 
     // ---------------------------------------------------------------- settings
     fn refresh_devices(&mut self) {
         use hamdrm_engine::decdsss_audio::{list_input_devices, list_output_devices};
-        self.inputs = list_input_devices().map(|v| v.into_iter().map(|d| d.name).collect()).unwrap_or_default();
-        self.outputs = list_output_devices().map(|v| v.into_iter().map(|d| d.name).collect()).unwrap_or_default();
+        self.inputs = list_input_devices()
+            .map(|v| v.into_iter().map(|d| d.name).collect())
+            .unwrap_or_default();
+        self.outputs = list_output_devices()
+            .map(|v| v.into_iter().map(|d| d.name).collect())
+            .unwrap_or_default();
         self.ports = decdsss_rig::ports().into_iter().map(|p| p.name).collect();
     }
 
     fn settings_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_settings;
         let mut apply = false;
-        egui::Window::new("Settings").open(&mut open).resizable(false).show(ctx, |ui| {
-            egui::Grid::new("set").num_columns(2).spacing([10.0, 6.0]).show(ui, |ui| {
-                ui.label("Receive from");
-                combo(ui, "in", &mut self.prefs.input, &self.inputs, "system default");
-                ui.end_row();
-                ui.label("Transmit to");
-                combo(ui, "out", &mut self.prefs.output, &self.outputs, "system default");
-                ui.end_row();
-                ui.label("TX level");
-                ui.add(egui::Slider::new(&mut self.prefs.level, 0.02..=0.5).text("RMS"));
-                ui.end_row();
-                ui.label("Carrier 0 at");
-                ui.add(egui::Slider::new(&mut self.prefs.dc_freq, 200.0..=600.0).suffix(" Hz"));
-                ui.end_row();
-                ui.label("PTT");
-                egui::ComboBox::from_id_salt("pttm").selected_text(self.prefs.ptt.method.label()).show_ui(ui, |ui| {
-                    for m in Method::ALL {
-                        ui.selectable_value(&mut self.prefs.ptt.method, m, m.label());
-                    }
-                });
-                ui.end_row();
-                ui.label("CAT");
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.prefs.ptt.cat, "on");
-                    egui::ComboBox::from_id_salt("rig").selected_text(self.prefs.ptt.rig.model.name()).show_ui(ui, |ui| {
-                        for m in Model::ALL {
-                            if ui.selectable_label(self.prefs.ptt.rig.model == m, m.label()).clicked() {
-                                self.prefs.ptt.rig = decdsss_rig::Settings::new(m, &self.prefs.ptt.rig.port);
-                            }
-                        }
+        egui::Window::new("Settings")
+            .open(&mut open)
+            .resizable(false)
+            .show(ctx, |ui| {
+                egui::Grid::new("set")
+                    .num_columns(2)
+                    .spacing([10.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.label("Receive from");
+                        combo(
+                            ui,
+                            "in",
+                            &mut self.prefs.input,
+                            &self.inputs,
+                            "system default",
+                        );
+                        ui.end_row();
+                        ui.label("Transmit to");
+                        combo(
+                            ui,
+                            "out",
+                            &mut self.prefs.output,
+                            &self.outputs,
+                            "system default",
+                        );
+                        ui.end_row();
+                        ui.label("TX level");
+                        ui.add(egui::Slider::new(&mut self.prefs.level, 0.02..=0.5).text("RMS"));
+                        ui.end_row();
+                        ui.label("Carrier 0 at");
+                        ui.add(
+                            egui::Slider::new(&mut self.prefs.dc_freq, 200.0..=600.0).suffix(" Hz"),
+                        );
+                        ui.end_row();
+                        ui.label("PTT");
+                        egui::ComboBox::from_id_salt("pttm")
+                            .selected_text(self.prefs.ptt.method.label())
+                            .show_ui(ui, |ui| {
+                                for m in Method::ALL {
+                                    ui.selectable_value(&mut self.prefs.ptt.method, m, m.label());
+                                }
+                            });
+                        ui.end_row();
+                        ui.label("CAT");
+                        ui.horizontal(|ui| {
+                            ui.checkbox(&mut self.prefs.ptt.cat, "on");
+                            egui::ComboBox::from_id_salt("rig")
+                                .selected_text(self.prefs.ptt.rig.model.name())
+                                .show_ui(ui, |ui| {
+                                    for m in Model::ALL {
+                                        if ui
+                                            .selectable_label(
+                                                self.prefs.ptt.rig.model == m,
+                                                m.label(),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.prefs.ptt.rig = decdsss_rig::Settings::new(
+                                                m,
+                                                &self.prefs.ptt.rig.port,
+                                            );
+                                        }
+                                    }
+                                });
+                        });
+                        ui.end_row();
+                        ui.label("CAT port");
+                        combo(
+                            ui,
+                            "catport",
+                            &mut self.prefs.ptt.rig.port,
+                            &self.ports,
+                            "—",
+                        );
+                        ui.end_row();
+                        ui.label("DTR/RTS port");
+                        combo(
+                            ui,
+                            "pttport",
+                            &mut self.prefs.ptt.ptt_port,
+                            &self.ports,
+                            "CAT port",
+                        );
+                        ui.end_row();
+                        ui.label("Lead / tail");
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::DragValue::new(&mut self.prefs.ptt.lead_ms)
+                                    .range(0..=2000)
+                                    .suffix(" ms"),
+                            );
+                            ui.add(
+                                egui::DragValue::new(&mut self.prefs.ptt.tail_ms)
+                                    .range(0..=2000)
+                                    .suffix(" ms"),
+                            );
+                        });
+                        ui.end_row();
+                        ui.label("BSR");
+                        ui.checkbox(
+                            &mut self.prefs.auto_bsr,
+                            "answer repeat requests for my files automatically",
+                        );
+                        ui.end_row();
+                        ui.label("Received files");
+                        ui.label(self.prefs.out_dir.display().to_string());
+                        ui.end_row();
                     });
-                });
-                ui.end_row();
-                ui.label("CAT port");
-                combo(ui, "catport", &mut self.prefs.ptt.rig.port, &self.ports, "—");
-                ui.end_row();
-                ui.label("DTR/RTS port");
-                combo(ui, "pttport", &mut self.prefs.ptt.ptt_port, &self.ports, "CAT port");
-                ui.end_row();
-                ui.label("Lead / tail");
-                ui.horizontal(|ui| {
-                    ui.add(egui::DragValue::new(&mut self.prefs.ptt.lead_ms).range(0..=2000).suffix(" ms"));
-                    ui.add(egui::DragValue::new(&mut self.prefs.ptt.tail_ms).range(0..=2000).suffix(" ms"));
-                });
-                ui.end_row();
-                ui.label("BSR");
-                ui.checkbox(&mut self.prefs.auto_bsr, "answer repeat requests for my files automatically");
-                ui.end_row();
-                ui.label("Received files");
-                ui.label(self.prefs.out_dir.display().to_string());
-                ui.end_row();
+                if let Err(e) = self.prefs.ptt.check() {
+                    ui.label(RichText::new(e).color(WARN));
+                }
+                if ui.button("Apply").clicked() {
+                    apply = true;
+                }
             });
-            if let Err(e) = self.prefs.ptt.check() {
-                ui.label(RichText::new(e).color(WARN));
-            }
-            if ui.button("Apply").clicked() {
-                apply = true;
-            }
-        });
         self.show_settings = open;
         if apply {
-            self.engine.send(Command::SetInput(Input::Sound(none_if_empty(&self.prefs.input))));
-            self.engine.send(Command::SetOutput(none_if_empty(&self.prefs.output)));
+            self.engine
+                .send(Command::SetInput(Input::Sound(none_if_empty(
+                    &self.prefs.input,
+                ))));
+            self.engine
+                .send(Command::SetOutput(none_if_empty(&self.prefs.output)));
             self.engine.send(Command::SetPtt(self.prefs.ptt.clone()));
             if self.save_prefs {
                 self.prefs.save();
@@ -605,26 +881,46 @@ impl eframe::App for App {
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         // Drag and drop to the transmit queue.
-        let dropped: Vec<PathBuf> = ui.input(|i| i.raw.dropped_files.iter().map(|f| f.path().to_path_buf()).collect());
+        let dropped: Vec<PathBuf> = ui.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .collect()
+        });
         self.queue.extend(dropped);
         let plain = |fill: Color32, m: i8| Frame::new().fill(fill).inner_margin(Margin::same(m));
-        egui::Panel::top("top").frame(plain(PANEL, 6)).show(ui, |ui| self.top_bar(ui));
-        egui::Panel::left("rx").frame(plain(PANEL, 8)).resizable(false).default_size(290.0).show(ui, |ui| {
-            egui::ScrollArea::vertical().id_salt("rxs").show(ui, |ui| self.receiver(ui));
-        });
-        egui::Panel::right("tx").frame(plain(PANEL, 8)).resizable(false).default_size(330.0).show(ui, |ui| {
-            self.transmit(ui);
-            ui.separator();
-            self.gallery(ui, &ctx);
-            ui.separator();
-            self.log(ui);
-        });
-        egui::CentralPanel::default().frame(plain(BG, 6)).show(ui, |ui| {
-            let h = (ui.available_height() * 0.45).max(220.0);
-            self.band(ui, h);
-            ui.add_space(6.0);
-            self.viewer(ui, &ctx);
-        });
+        egui::Panel::top("top")
+            .frame(plain(PANEL, 6))
+            .show(ui, |ui| self.top_bar(ui));
+        egui::Panel::left("rx")
+            .frame(plain(PANEL, 8))
+            .resizable(false)
+            .default_size(290.0)
+            .show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("rxs")
+                    .show(ui, |ui| self.receiver(ui));
+            });
+        egui::Panel::right("tx")
+            .frame(plain(PANEL, 8))
+            .resizable(false)
+            .default_size(330.0)
+            .show(ui, |ui| {
+                self.transmit(ui);
+                ui.separator();
+                self.gallery(ui, &ctx);
+                ui.separator();
+                self.log(ui);
+            });
+        egui::CentralPanel::default()
+            .frame(plain(BG, 6))
+            .show(ui, |ui| {
+                let h = (ui.available_height() * 0.45).max(220.0);
+                self.band(ui, h);
+                ui.add_space(6.0);
+                self.viewer(ui, &ctx);
+            });
         if self.show_settings {
             self.settings_window(&ctx);
         }
@@ -650,15 +946,20 @@ fn row(ui: &mut Ui, k: &str, v: String) {
 
 fn led(ui: &mut Ui, t: &str, on: bool) {
     let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-    ui.painter().circle_filled(r.center(), 5.0, if on { GOOD } else { WELL_BAR });
+    ui.painter()
+        .circle_filled(r.center(), 5.0, if on { GOOD } else { WELL_BAR });
     ui.label(RichText::new(t).color(if on { TEXT } else { FAINT }));
     ui.add_space(4.0);
 }
 
 fn pill(ui: &mut Ui, t: &str, c: Color32) {
-    Frame::new().fill(PANEL2).corner_radius(8.0).inner_margin(Margin::symmetric(8, 2)).show(ui, |ui| {
-        ui.label(RichText::new(t).color(c).strong());
-    });
+    Frame::new()
+        .fill(PANEL2)
+        .corner_radius(8.0)
+        .inner_margin(Margin::symmetric(8, 2))
+        .show(ui, |ui| {
+            ui.label(RichText::new(t).color(c).strong());
+        });
 }
 
 fn level_meter(ui: &mut Ui, db: f64) {
@@ -666,8 +967,18 @@ fn level_meter(ui: &mut Ui, db: f64) {
     let p = ui.painter();
     p.rect_filled(r, 2.0, WELL_BAR);
     let t = ((db + 60.0) / 60.0).clamp(0.0, 1.0) as f32;
-    let col = if db > -3.0 { BAD } else if db > -10.0 { WARN } else { GOOD };
-    p.rect_filled(egui::Rect::from_min_size(r.min, vec2(r.width() * t, r.height())), 2.0, col);
+    let col = if db > -3.0 {
+        BAD
+    } else if db > -10.0 {
+        WARN
+    } else {
+        GOOD
+    };
+    p.rect_filled(
+        egui::Rect::from_min_size(r.min, vec2(r.width() * t, r.height())),
+        2.0,
+        col,
+    );
     ui.label(RichText::new(format!("{db:.0} dBFS")).color(DIM).size(11.0));
 }
 
@@ -691,46 +1002,78 @@ fn segment_strip(ui: &mut Ui, segs: &[bool], done: bool) {
             (false, _) => PANEL2,
         };
         let x = r.left() + i as f32 * dx;
-        p.rect_filled(egui::Rect::from_min_size(pos2(x, r.top()), vec2(dx.max(1.0), r.height())), 0.0, c);
+        p.rect_filled(
+            egui::Rect::from_min_size(pos2(x, r.top()), vec2(dx.max(1.0), r.height())),
+            0.0,
+            c,
+        );
     }
 }
 
 fn combo(ui: &mut Ui, id: &str, value: &mut String, options: &[String], default: &str) {
-    let shown = if value.is_empty() { default.to_string() } else { value.clone() };
-    egui::ComboBox::from_id_salt(id).width(230.0).selected_text(short(&shown)).show_ui(ui, |ui| {
-        ui.selectable_value(value, String::new(), default);
-        for o in options {
-            ui.selectable_value(value, o.clone(), o);
-        }
-    });
+    let shown = if value.is_empty() {
+        default.to_string()
+    } else {
+        value.clone()
+    };
+    egui::ComboBox::from_id_salt(id)
+        .width(230.0)
+        .selected_text(short(&shown))
+        .show_ui(ui, |ui| {
+            ui.selectable_value(value, String::new(), default);
+            for o in options {
+                ui.selectable_value(value, o.clone(), o);
+            }
+        });
 }
 
 fn short(s: &str) -> String {
-    if s.chars().count() > 34 { format!("{}…", s.chars().take(33).collect::<String>()) } else { s.to_string() }
+    if s.chars().count() > 34 {
+        format!("{}…", s.chars().take(33).collect::<String>())
+    } else {
+        s.to_string()
+    }
 }
 
 fn file_label(p: &std::path::Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default()
+    p.file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_default()
 }
 
 fn none_if_empty(s: &str) -> Option<String> {
-    if s.is_empty() { None } else { Some(s.to_string()) }
+    if s.is_empty() {
+        None
+    } else {
+        Some(s.to_string())
+    }
 }
 
 fn open_path(p: &std::path::Path) -> std::io::Result<()> {
     #[cfg(windows)]
     {
-        std::process::Command::new("explorer").arg(p).spawn().map(|_| ())
+        std::process::Command::new("explorer")
+            .arg(p)
+            .spawn()
+            .map(|_| ())
     }
     #[cfg(not(windows))]
     {
-        std::process::Command::new("xdg-open").arg(p).spawn().map(|_| ())
+        std::process::Command::new("xdg-open")
+            .arg(p)
+            .spawn()
+            .map(|_| ())
     }
 }
 
 fn main() -> eframe::Result {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("dechamdrm-gui {}", env!("CARGO_PKG_VERSION"));
+        return Ok(());
+    }
     let mut args = std::env::args().skip(1);
-    let (mut file, mut speed, mut out_dir, mut shot_path, mut after) = (None, 1.0, None, None, 10.0);
+    let (mut file, mut speed, mut out_dir, mut shot_path, mut after) =
+        (None, 1.0, None, None, 10.0);
     while let Some(a) = args.next() {
         match a.as_str() {
             "--speed" => speed = args.next().and_then(|v| v.parse().ok()).unwrap_or(1.0),
@@ -741,19 +1084,34 @@ fn main() -> eframe::Result {
         }
     }
     let unattended = shot_path.is_some() || out_dir.is_some();
-    let mut prefs = if unattended { Prefs::default() } else { Prefs::load() };
+    let mut prefs = if unattended {
+        Prefs::default()
+    } else {
+        Prefs::load()
+    };
     if let Some(d) = &out_dir {
         prefs.out_dir = d.clone();
     }
     let input = match &file {
-        Some(p) => Input::File { path: p.clone(), speed },
+        Some(p) => Input::File {
+            path: p.clone(),
+            speed,
+        },
         None => Input::Sound(none_if_empty(&prefs.input)),
     };
     let opts = Options {
         input,
         // Unattended runs never play anything.
-        output: if unattended { Some(String::new()) } else { none_if_empty(&prefs.output) },
-        ptt: if unattended { PttConfig::default() } else { prefs.ptt.clone() },
+        output: if unattended {
+            Some(String::new())
+        } else {
+            none_if_empty(&prefs.output)
+        },
+        ptt: if unattended {
+            PttConfig::default()
+        } else {
+            prefs.ptt.clone()
+        },
         out_dir: prefs.out_dir.clone(),
         rx: ReceiverConfig::default(),
         auto_bsr: prefs.auto_bsr,
@@ -793,7 +1151,11 @@ fn main() -> eframe::Result {
                 outputs: Vec::new(),
                 ports: Vec::new(),
                 started: Instant::now(),
-                shot: shot_path.map(|path| Shot { path, after, requested: None }),
+                shot: shot_path.map(|path| Shot {
+                    path,
+                    after,
+                    requested: None,
+                }),
             }))
         }),
     )

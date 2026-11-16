@@ -131,7 +131,9 @@ impl Layout {
     }
 
     pub fn all() -> impl Iterator<Item = Layout> {
-        Mode::ALL.into_iter().flat_map(|m| Bandwidth::ALL.into_iter().map(move |b| Layout::new(m, b)))
+        Mode::ALL
+            .into_iter()
+            .flat_map(|m| Bandwidth::ALL.into_iter().map(move |b| Layout::new(m, b)))
     }
 
     /// Carrier range (Kmin, Kmax) (EasyDRF `TableCarrier.h:87-95`).
@@ -239,7 +241,11 @@ mod tests {
     #[test]
     fn every_frame_is_400_ms() {
         for m in Mode::ALL {
-            assert_eq!(m.symbol_len() * m.symbols_per_frame(), SAMPLES_PER_FRAME, "{m}");
+            assert_eq!(
+                m.symbol_len() * m.symbols_per_frame(),
+                SAMPLES_PER_FRAME,
+                "{m}"
+            );
         }
     }
 
