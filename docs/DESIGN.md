@@ -64,7 +64,10 @@ files land in `run\Rx Files`. Above about 2× real time it stalls. Script:
 
 1. [x] Specs from the references (phy, app).
 2. [x] Core TX: file → MOT → MSC → OFDM WAV, byte-exact through EasyDRF's receiver.
-3. [ ] Core RX: our TX loopback through the channel simulator (AWGN, HF fading).
+3. [x] Core RX: our TX loopback through the channel simulator (AWGN, HF fading).
+   Measured AWGN thresholds (≥ 99 % of frames, SNR in 2.5 kHz, 0.5 dB steps, 2 × 60
+   frames, `awgn_threshold_sweep`): mode B 2.5 kHz 4-QAM 6.0 dB, 16-QAM p0 10.0 dB,
+   16-QAM p1 11.5 dB, 64-QAM p0 15.0 dB; 16-QAM p0 in mode A 9.5 dB, mode E 9.5 dB.
 4. [ ] RS erasure coding + BSR, picture gallery.
 5. [ ] CLI rx/tx on WAV and sound card.
 6. [ ] GUI.

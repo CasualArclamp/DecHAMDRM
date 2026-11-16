@@ -12,6 +12,7 @@ pub mod cellmap;
 pub mod fac;
 pub mod mlc;
 pub mod params;
+pub mod rx;
 pub mod tables;
 pub mod tx;
 pub mod wftext;
