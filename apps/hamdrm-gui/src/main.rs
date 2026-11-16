@@ -11,6 +11,7 @@
 mod plots;
 mod prefs;
 mod theme;
+mod transcode;
 
 use eframe::egui::{
     self, Align2, Color32, ColorImage, FontId, Frame, Margin, RichText, Sense, Stroke,
@@ -39,6 +40,19 @@ enum CentreTab {
     Channel,
 }
 
+/// The picture transcoder window.
+struct Jp2Window {
+    name: String,
+    source: std::sync::Arc<image::DynamicImage>,
+    source_tex: Option<(TextureHandle, [usize; 2])>,
+    /// Pixels waiting to become `source_tex` (textures need the egui context).
+    source_rgba: Option<(Vec<u8>, [usize; 2])>,
+    settings: transcode::Settings,
+    result: Option<transcode::Encoded>,
+    result_tex: Option<TextureHandle>,
+    error: Option<String>,
+}
+
 struct App {
     engine: Engine,
     view: View,
@@ -62,6 +76,8 @@ struct App {
     id_text: String,
     tuning: bool,
     show_settings: bool,
+    jp2: Option<Jp2Window>,
+    transcoder: transcode::Transcoder,
     inputs: Vec<String>,
     outputs: Vec<String>,
     ports: Vec<String>,
@@ -158,7 +174,7 @@ impl App {
         self.images
             .entry(path.clone())
             .or_insert_with(|| {
-                let img = image::open(path).ok()?.to_rgba8();
+                let img = transcode::open_picture(path)?.to_rgba8();
                 let size = [img.width() as usize, img.height() as usize];
                 let ci = ColorImage::from_rgba_unmultiplied(size, img.as_raw());
                 Some((
@@ -558,6 +574,16 @@ impl App {
             {
                 self.queue.extend(f);
             }
+            if ui.button("Picture → JP2…").clicked()
+                && let Some(f) = rfd::FileDialog::new()
+                    .add_filter(
+                        "Pictures",
+                        &["jpg", "jpeg", "png", "bmp", "gif", "webp", "jp2", "j2k"],
+                    )
+                    .pick_file()
+            {
+                self.open_transcoder(&f);
+            }
             if ui.button("Clear").clicked() {
                 self.queue.clear();
             }
@@ -767,6 +793,196 @@ impl App {
             .map(|v| v.into_iter().map(|d| d.name).collect())
             .unwrap_or_default();
         self.ports = decdsss_rig::ports().into_iter().map(|p| p.name).collect();
+    }
+
+    // ---------------------------------------------------------------- JPEG 2000
+    fn open_transcoder(&mut self, path: &std::path::Path) {
+        let Some(img) = transcode::open_picture(path) else {
+            eprintln!("cannot read {}", path.display());
+            return;
+        };
+        let src = std::sync::Arc::new(img);
+        let rgba = src.to_rgba8();
+        let size = [rgba.width() as usize, rgba.height() as usize];
+        let settings = transcode::Settings {
+            quality: self.prefs.jp2_quality,
+            max_side: self.prefs.jp2_side,
+        };
+        self.transcoder.request(src.clone(), settings);
+        self.jp2 = Some(Jp2Window {
+            name: path
+                .file_stem()
+                .map(|n| n.to_string_lossy().to_string())
+                .unwrap_or_else(|| "picture".into()),
+            source: src,
+            source_tex: None,
+            source_rgba: Some((rgba.into_raw(), size)),
+            settings,
+            result: None,
+            result_tex: None,
+            error: None,
+        });
+    }
+
+    fn jp2_window(&mut self, ctx: &egui::Context) {
+        // Collect the newest encode even while the window is being closed.
+        let polled = self.transcoder.poll();
+        let Some(w) = &mut self.jp2 else { return };
+        match polled {
+            Some(Ok(e)) => {
+                let img = ColorImage::from_rgba_unmultiplied(e.size, &e.rgba);
+                match &mut w.result_tex {
+                    Some(t) => t.set(img, TextureOptions::LINEAR),
+                    None => {
+                        w.result_tex =
+                            Some(ctx.load_texture("jp2-result", img, TextureOptions::LINEAR))
+                    }
+                }
+                w.error = None;
+                w.result = Some(e);
+            }
+            Some(Err(e)) => w.error = Some(e),
+            None => {}
+        }
+        if let Some((rgba, size)) = w.source_rgba.take() {
+            let img = ColorImage::from_rgba_unmultiplied(size, &rgba);
+            w.source_tex = Some((
+                ctx.load_texture("jp2-source", img, TextureOptions::LINEAR),
+                size,
+            ));
+        }
+        let tx_settings = {
+            let p = &self.prefs;
+            TxSettings {
+                msc: MscConfig {
+                    layout: Layout::new(p.mode, p.bandwidth),
+                    qam: p.qam,
+                    protection: p.protection,
+                    interleave: if p.long {
+                        Interleave::Long
+                    } else {
+                        Interleave::Short
+                    },
+                },
+                call: p.call.clone(),
+                rs: p.rs,
+                lead_in: p.lead_in,
+                dc_freq: p.dc_freq,
+                rms: p.level,
+            }
+        };
+        let mut open = true;
+        let mut add = false;
+        let before = w.settings;
+        egui::Window::new("Picture → JPEG 2000")
+            .open(&mut open)
+            .default_size([900.0, 560.0])
+            .show(ctx, |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("Quality");
+                    ui.add(egui::Slider::new(&mut w.settings.quality, 1..=100));
+                    ui.add_space(12.0);
+                    ui.label("Longest side");
+                    ui.add(
+                        egui::Slider::new(&mut w.settings.max_side, 96..=1280)
+                            .logarithmic(true)
+                            .suffix(" px"),
+                    );
+                });
+                ui.horizontal(|ui| {
+                    match &w.result {
+                        Some(r) => {
+                            let secs = hamdrm_engine::estimate_seconds(&tx_settings, r.jp2.len());
+                            ui.label(
+                                RichText::new(format!(
+                                    "{} × {}   {} bytes   ≈ {:.0} s on air ({})   encoded in {} ms",
+                                    r.size[0],
+                                    r.size[1],
+                                    r.jp2.len(),
+                                    secs,
+                                    tx_settings.msc,
+                                    r.millis
+                                ))
+                                .color(WHITE)
+                                .strong(),
+                            );
+                        }
+                        None => {
+                            ui.label(RichText::new("encoding…").color(DIM));
+                        }
+                    }
+                    if self.transcoder.busy() {
+                        ui.spinner();
+                    }
+                    if let Some(e) = &w.error {
+                        ui.label(RichText::new(e).color(BAD));
+                    }
+                });
+                ui.horizontal(|ui| {
+                    let ready = w.result.as_ref().is_some_and(|r| r.settings == w.settings)
+                        && !self.transcoder.busy();
+                    if ui
+                        .add_enabled(
+                            ready,
+                            egui::Button::new(RichText::new("Add to send queue").strong()),
+                        )
+                        .clicked()
+                    {
+                        add = true;
+                    }
+                    ui.label(
+                        RichText::new("left: original   right: what the other station will see")
+                            .color(DIM),
+                    );
+                });
+                ui.separator();
+                let avail = ui.available_size();
+                let half = vec2((avail.x - 10.0) / 2.0, avail.y.max(200.0));
+                ui.horizontal(|ui| {
+                    let show = |ui: &mut Ui, tex: Option<(&TextureHandle, [usize; 2])>| {
+                        let (rect, _) = ui.allocate_exact_size(half, Sense::hover());
+                        ui.painter().rect_filled(rect, 3.0, WELL);
+                        if let Some((t, size)) = tex {
+                            let sc = (half.x / size[0] as f32).min(half.y / size[1] as f32);
+                            let sz = vec2(size[0] as f32 * sc, size[1] as f32 * sc);
+                            ui.painter().image(
+                                t.id(),
+                                egui::Rect::from_center_size(rect.center(), sz),
+                                egui::Rect::from_min_max(pos2(0.0, 0.0), pos2(1.0, 1.0)),
+                                Color32::WHITE,
+                            );
+                        }
+                    };
+                    show(ui, w.source_tex.as_ref().map(|(t, s)| (t, *s)));
+                    show(
+                        ui,
+                        w.result_tex
+                            .as_ref()
+                            .zip(w.result.as_ref())
+                            .map(|(t, r)| (t, r.size)),
+                    );
+                });
+            });
+        if w.settings != before {
+            self.transcoder.request(w.source.clone(), w.settings);
+            self.prefs.jp2_quality = w.settings.quality;
+            self.prefs.jp2_side = w.settings.max_side;
+        }
+        if add && let Some(r) = &w.result {
+            let dir = transcode::tx_dir();
+            let _ = std::fs::create_dir_all(&dir);
+            let path = dir.join(format!("{}.jp2", w.name));
+            match std::fs::write(&path, &r.jp2) {
+                Ok(()) => {
+                    self.queue.push(path);
+                    open = false;
+                }
+                Err(e) => w.error = Some(e.to_string()),
+            }
+        }
+        if !open {
+            self.jp2 = None;
+        }
     }
 
     fn settings_window(&mut self, ctx: &egui::Context) {
@@ -1040,6 +1256,7 @@ impl eframe::App for App {
         if self.show_settings {
             self.settings_window(&ctx);
         }
+        self.jp2_window(&ctx);
     }
 
     fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
@@ -1189,6 +1406,8 @@ fn main() -> eframe::Result {
     }
     let mut args = std::env::args().skip(1);
     let mut start_channel = false;
+    let mut jp2_arg: Option<PathBuf> = None;
+    let mut jp2_quality: Option<u32> = None;
     let (mut file, mut speed, mut out_dir, mut shot_path, mut after) =
         (None, 1.0, None, None, 10.0);
     while let Some(a) = args.next() {
@@ -1197,6 +1416,8 @@ fn main() -> eframe::Result {
             "--out-dir" => out_dir = args.next().map(PathBuf::from),
             "--screenshot" => shot_path = args.next().map(PathBuf::from),
             "--tab" => start_channel = args.next().as_deref() == Some("channel"),
+            "--jp2" => jp2_arg = args.next().map(PathBuf::from),
+            "--jp2-quality" => jp2_quality = args.next().and_then(|v| v.parse().ok()),
             "--after" => after = args.next().and_then(|v| v.parse().ok()).unwrap_or(10.0),
             _ => file = Some(PathBuf::from(a)),
         }
@@ -1215,6 +1436,8 @@ fn main() -> eframe::Result {
             path: p.clone(),
             speed,
         },
+        // Unattended runs without a file listen to nothing.
+        None if unattended => Input::None,
         None => Input::Sound(none_if_empty(&prefs.input)),
     };
     let opts = Options {
@@ -1254,7 +1477,7 @@ fn main() -> eframe::Result {
         options,
         Box::new(move |cc| {
             theme::apply(&cc.egui_ctx);
-            Ok(Box::new(App {
+            let mut app = App {
                 engine: Engine::start(opts),
                 view: View::default(),
                 prefs,
@@ -1280,6 +1503,8 @@ fn main() -> eframe::Result {
                 id_text: String::new(),
                 tuning: false,
                 show_settings: false,
+                jp2: None,
+                transcoder: transcode::Transcoder::new(),
                 inputs: Vec::new(),
                 outputs: Vec::new(),
                 ports: Vec::new(),
@@ -1289,7 +1514,14 @@ fn main() -> eframe::Result {
                     after,
                     requested: None,
                 }),
-            }))
+            };
+            if let Some(q) = jp2_quality {
+                app.prefs.jp2_quality = q.clamp(1, 100);
+            }
+            if let Some(p) = &jp2_arg {
+                app.open_transcoder(p);
+            }
+            Ok(Box::new(app))
         }),
     )
 }

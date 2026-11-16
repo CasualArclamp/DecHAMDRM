@@ -25,6 +25,8 @@ pub struct Prefs {
     pub speaker: String,
     pub mic_gain: f32,
     pub voice: VoiceKind,
+    pub jp2_quality: u32,
+    pub jp2_side: u32,
 }
 
 impl Default for Prefs {
@@ -50,6 +52,8 @@ impl Default for Prefs {
             speaker: String::new(),
             mic_gain: 1.0,
             voice: VoiceKind::Neural,
+            jp2_quality: 40,
+            jp2_side: 480,
         }
     }
 }
@@ -118,6 +122,8 @@ impl Prefs {
         } else {
             VoiceKind::Neural
         };
+        p.jp2_quality = num("jp2_quality").map_or(40, |v| v as u32).clamp(1, 100);
+        p.jp2_side = num("jp2_side").map_or(480, |v| v as u32).clamp(96, 1280);
         p.ptt = PttConfig::from_lookup(|k| map.get(k).map(String::as_str));
         p
     }
@@ -169,6 +175,8 @@ impl Prefs {
             }
             .into(),
         );
+        kv("jp2_quality", self.jp2_quality.to_string());
+        kv("jp2_side", self.jp2_side.to_string());
         for (k, v) in self.ptt.to_pairs() {
             kv(k, v);
         }
