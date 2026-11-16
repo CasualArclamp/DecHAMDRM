@@ -14,5 +14,6 @@ pub mod mlc;
 pub mod params;
 pub mod tables;
 pub mod tx;
+pub mod wftext;
 
 pub use decdrm_core::{Cplx, Real};

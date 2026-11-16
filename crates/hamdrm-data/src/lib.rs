@@ -1,6 +1,7 @@
 //! DecHAMDRM application layer: packets, MOT objects, Reed–Solomon file coding and
 //! BSR, compatible with EasyPal, EasyDRF and QSSTV (`docs/spec/app.md`).
 
+pub mod bsr;
 pub mod mot;
 pub mod packet;
 pub mod rs;
