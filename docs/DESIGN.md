@@ -79,6 +79,22 @@ writes received voice to `voice.wav`. GUI: Talk button, microphone / speaker / g
 Settings. Not done: EasyDRF's Speex mode, the text message in voice frames, and voice
 quality has only been checked by a spectral-distance measure, not by listening.
 
+## GUI additions (2026-11-16, asked by Rory)
+
+- **Picture → JPEG 2000 transcoder** (`apps/hamdrm-gui/src/transcode.rs`): quality
+  slider (compression ratio 2:1 … 400:1, log scale) and longest-side slider; a worker
+  thread re-encodes on every change (newest request wins) and decodes the result, so
+  the right-hand preview is what the other station sees; size and air time shown;
+  "Add to send queue" writes `NAME.jp2` into `%APPDATA%/DecHAMDRM/Tx Files`. Received
+  `.jp2` pictures display too. Codec: `jpeg2k`/`openjp2` (pure Rust).
+  Unattended look: `--jp2 FILE --jp2-quality N --screenshot …`.
+- **FAC and MSC constellations** side by side, 1.6 px dots (DecDVB-T style), redrawn
+  every display frame from the receiver's rolling cell window; engine blocks 40 ms.
+- **Channel tab** (DecDRM style, `plots.rs`): |H|², group delay, impulse response with
+  guard interval and estimated spread, SNR per carrier, fading map of 64 symbols.
+  `--tab channel` for screenshots.
+- Live voice loop test (silent, cables A and B): `--example voice_loop`.
+
 ## Interop testing
 
 `..\easydrf-build` is EasyDRF built from source with a local patch to `sound/Sound.cpp`:

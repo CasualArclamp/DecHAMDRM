@@ -169,10 +169,10 @@ impl App {
     fn image(
         &mut self,
         ctx: &egui::Context,
-        path: &PathBuf,
+        path: &std::path::Path,
     ) -> Option<(TextureHandle, [usize; 2])> {
         self.images
-            .entry(path.clone())
+            .entry(path.to_path_buf())
             .or_insert_with(|| {
                 let img = transcode::open_picture(path)?.to_rgba8();
                 let size = [img.width() as usize, img.height() as usize];
