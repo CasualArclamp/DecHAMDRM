@@ -68,10 +68,31 @@ files land in `run\Rx Files`. Above about 2× real time it stalls. Script:
    Measured AWGN thresholds (≥ 99 % of frames, SNR in 2.5 kHz, 0.5 dB steps, 2 × 60
    frames, `awgn_threshold_sweep`): mode B 2.5 kHz 4-QAM 6.0 dB, 16-QAM p0 10.0 dB,
    16-QAM p1 11.5 dB, 64-QAM p0 15.0 dB; 16-QAM p0 in mode A 9.5 dB, mode E 9.5 dB.
-4. [ ] RS erasure coding + BSR, picture gallery.
-5. [ ] CLI rx/tx on WAV and sound card.
-6. [ ] GUI.
-7. [ ] Waterfall text / FSK ID.
-8. [ ] Digital voice.
-9. [ ] Better-FEC modes.
-10. [ ] CAT/PTT, portable exe, CI, release.
+4. [x] RS erasure coding (EasyPal/QSSTV `.rsN` send+receive, EasyDRF receive) + BSR
+   (request, parse, repair), LZMA `.lz`, file receiver with sanitised names.
+5. [x] CLI: `dechamdrm tx FILES --out x.wav`, `dechamdrm rx x.wav --out-dir DIR`.
+6. [x] GUI (`dechamdrm-gui`) + engine: sound card / WAV input, TX queue, PTT via
+   decdsss-rig (VOX default), waterfall, gallery. Live VB-cable loop verified
+   (`--example cable_loop`).
+7. [~] Waterfall text (EasyDRF style) done; QSSTV FSK ID not done (QSSTV only sends it
+   after analogue SSTV, so low priority).
+8. [ ] Digital voice (EasyDRF LPC-10 HVDI / Speex framing, app.md §7; our own with
+   Codec2 from DecDSSS or Opus).
+9. [ ] Better-FEC modes (see above).
+10. [~] CI, release workflow, portable exes done; release not cut.
+
+## Interop results
+
+- Our TX → EasyDRF RX: all 30 mode/bandwidth/QAM/protection combinations byte-exact
+  (2026-11-16). With a 9-segment lead-in, B 2.3 kHz 64-QAM p0 sometimes lost both MOT
+  headers because EasyDRF locks slowly in that mode; default lead-in is now 24 segments
+  (EasyDRF's own startup value) and the leader repeats for small files.
+- EasyDRF/EasyPal TX → our RX: **not yet tested** (needs EasyDRF's transmit path
+  automated, or a recording from the user).
+
+## Open items
+
+- Test vectors from real EasyPal / EasyDRF transmissions (RX interop, EasyDRF RS).
+- JPEG 2000 display in the GUI (EasyPal sends `.jp2`; files are saved, not shown).
+- Receiver status after the signal ends keeps the last figures (MER from noise-only
+  symbols); show "signal lost" instead.

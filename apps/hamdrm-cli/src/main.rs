@@ -73,12 +73,15 @@ struct TxArgs {
     /// Callsign / label (max 9 characters).
     #[arg(long, default_value = "NOCALL")]
     call: String,
-    /// Lead-in body segments before the first file.
-    #[arg(long, default_value_t = 9)]
+    /// Lead-in body segments before the first file (EasyDRF sends 24 at startup, 14 later).
+    #[arg(long, default_value_t = 24)]
     lead_in: usize,
     /// Audio frequency of carrier 0, Hz.
     #[arg(long, default_value_t = 350.0)]
     dc: f64,
+    /// RMS output level (full scale 1.0).
+    #[arg(long, default_value_t = 0.2)]
+    level: f64,
     /// Silence before and after, seconds.
     #[arg(long, default_value_t = 0.5)]
     pad: f64,
@@ -121,6 +124,7 @@ fn tx(a: TxArgs) -> Result<()> {
     let msc = parse_config(&a)?;
     let mut cfg = TxConfig::new(msc, &a.call);
     cfg.dc_freq = a.dc;
+    cfg.rms = a.level;
     let mut tx = Transmitter::new(cfg);
     let mut files = Vec::new();
     for p in &a.files {

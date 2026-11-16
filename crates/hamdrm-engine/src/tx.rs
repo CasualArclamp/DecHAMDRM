@@ -28,7 +28,7 @@ impl Default for TxSettings {
             msc: MscConfig::default_picture(),
             call: "NOCALL".into(),
             rs: 0,
-            lead_in: 9,
+            lead_in: 24,
             dc_freq: DEFAULT_DC_FREQ,
             rms: 0.2,
         }

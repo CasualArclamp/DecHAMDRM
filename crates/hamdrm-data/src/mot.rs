@@ -285,11 +285,18 @@ impl MotEncoder {
     /// Whole transmission of `objects` with a lead-in of `lead_in` segments.
     pub fn transmission(&mut self, objects: &[MotObject], lead_in: usize) -> Vec<Vec<u8>> {
         let mut out = Vec::new();
-        if let Some(first) = objects.first()
-            && lead_in > 0
-        {
+        // Lead-in: copies of the first object's header, first segments and last
+        // segment until `lead_in` body segments have gone out, so a receiver has
+        // time to lock before the real object starts (EasyDRF
+        // `MOTSlideShow.cpp:256-307` repeats the leader for small files the same way).
+        if let Some(first) = objects.first() {
             let k: Vec<usize> = (0..lead_in.min(self.segments(first))).collect();
-            out.extend(self.object(first, &k));
+            let mut sent = 0;
+            while sent < lead_in {
+                let groups = self.object(first, &k);
+                sent += groups.len() - 1;
+                out.extend(groups);
+            }
         }
         for o in objects {
             let all: Vec<usize> = (0..self.segments(o)).collect();

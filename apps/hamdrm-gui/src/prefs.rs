@@ -33,7 +33,7 @@ impl Default for Prefs {
             protection: 0,
             long: false,
             rs: 0,
-            lead_in: 9,
+            lead_in: 24,
             dc_freq: 350.0,
             level: 0.2,
             input: String::new(),
@@ -93,7 +93,7 @@ impl Prefs {
         p.protection = num("protection").map_or(0, |v| v as u8).min(1);
         p.long = get("long") == Some("1");
         p.rs = num("rs").map_or(0, |v| v as u8).min(4);
-        p.lead_in = num("lead_in").map_or(9, |v| v as usize).min(24);
+        p.lead_in = num("lead_in").map_or(24, |v| v as usize).min(24);
         p.dc_freq = num("dc_freq").unwrap_or(350.0).clamp(200.0, 600.0);
         p.level = num("level").unwrap_or(0.2).clamp(0.02, 0.5);
         p.input = get("input").unwrap_or_default().into();
