@@ -1,0 +1,19 @@
+[package]
+name = "hamdrm-cli"
+description = "DecHAMDRM command line: send and receive HamDRM files as WAV"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dechamdrm"
+path = "src/main.rs"
+
+[dependencies]
+hamdrm-core.workspace = true
+hamdrm-data.workspace = true
+anyhow.workspace = true
+hound.workspace = true
+clap.workspace = true

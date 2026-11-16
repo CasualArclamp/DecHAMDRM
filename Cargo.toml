@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/*"]
+members = ["crates/*", "apps/*"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,6 +17,10 @@ num-complex = "0.4.6"
 rustfft = "6.4"
 thiserror = "2"
 anyhow = "1"
+hound = "3.5.1"
+clap = { version = "4.6", features = ["derive"] }
+hamdrm-core = { path = "crates/hamdrm-core" }
+hamdrm-data = { path = "crates/hamdrm-data" }
 
 # DSP is unusably slow unoptimised (same tradeoff as DecDRM).
 [profile.dev]

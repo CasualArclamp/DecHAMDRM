@@ -1,0 +1,11 @@
+[package]
+name = "hamdrm-data"
+description = "HamDRM application layer: packets, MOT objects, Reed-Solomon file coding, BSR"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+decdrm-core.workspace = true
