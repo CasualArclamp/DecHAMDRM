@@ -1,0 +1,228 @@
+--- easydrf-ref/sound/Sound.cpp	2026-11-16 15:08:13.114857600 +1000
++++ easydrf-build/sound/Sound.cpp	2026-11-16 20:03:36.129778300 +1000
+@@ -35,11 +35,101 @@
+ \******************************************************************************/
+ 
+ 
++
++/* DecHAMDRM interop harness, transmit side: EASYDRF_TXWAV=out.wav writes the transmit
++   audio (left channel, 48 kHz mono 16-bit) to a file instead of the sound card, paced at
++   EASYDRF_SPEED x real time; EASYDRF_MIC=speech.wav stands in for the microphone.
++   No sound device is opened. Local test build only. */
++#include <mutex>
++static FILE* g_txwav = nullptr;
++static long long g_txsamples = 0;
++static std::mutex g_txlock;
++void HarnessFinishTx()
++{
++	g_txlock.lock();
++	if (g_txwav) {
++		unsigned int data = (unsigned int)(g_txsamples * 2), riff = data + 36;
++		fseek(g_txwav, 4, SEEK_SET); fwrite(&riff, 4, 1, g_txwav);
++		fseek(g_txwav, 40, SEEK_SET); fwrite(&data, 4, 1, g_txwav);
++		fclose(g_txwav); g_txwav = nullptr;
++	}
++	ExitProcess(0);
++}
++static _BOOLEAN HarnessWrite(CVector<short>& psData)
++{
++	static DWORD t0 = 0; static double speed = 2.0; static bool tried = false;
++	g_txlock.lock();
++	if (!tried) {
++		tried = true;
++		g_txwav = fopen(getenv("EASYDRF_TXWAV"), "wb");
++		if (g_txwav) {
++			unsigned char h[44] = { 'R','I','F','F',0,0,0,0,'W','A','V','E','f','m','t',' ',16,0,0,0,1,0,1,0,
++				0x80,0xBB,0,0, 0x00,0x77,0x01,0, 2,0,16,0,'d','a','t','a',0,0,0,0 };
++			fwrite(h, 1, 44, g_txwav);
++		}
++		t0 = GetTickCount();
++		const char* sp = getenv("EASYDRF_SPEED");
++		if (sp) speed = atof(sp);
++	}
++	const int n = psData.Size() / 2;
++	if (g_txwav) for (int i = 0; i < n; i++) { short s = psData[2 * i]; fwrite(&s, 2, 1, g_txwav); }
++	g_txsamples += n;
++	g_txlock.unlock();
++	double due = g_txsamples * 1000.0 / 48000.0 / speed;
++	DWORD now = GetTickCount() - t0;
++	if (due > now) Sleep((DWORD)(due - now));
++	return FALSE;
++}
++
+ _BOOLEAN CSound::Read(CVector<short>& psData)
+ {
+ 	int			i = 0; //inits DM
+ 	_BOOLEAN	bError = FALSE;
+ 
++	if (getenv("EASYDRF_TXWAV")) {
++		static FILE* mf = nullptr; static bool mtried = false; static long long tail = 0;
++		if (!mtried) {
++			mtried = true;
++			const char* p = getenv("EASYDRF_MIC");
++			if (p) { mf = fopen(p, "rb"); if (mf) fseek(mf, 44, SEEK_SET); }
++		}
++		for (i = 0; i < iBufferSizeIn / 2; i++) {
++			short s = 0;
++			if (mf && fread(&s, 2, 1, mf) != 1) { s = 0; tail++; }
++			psData[2 * i] = s; psData[2 * i + 1] = s;
++		}
++		if (mf && tail > 48000LL * 2) HarnessFinishTx();
++		return FALSE;
++	}
++
++	/* DecHAMDRM interop harness: EASYDRF_WAV=file.wav feeds a 48 kHz mono 16-bit WAV
++	   instead of the sound card at EASYDRF_SPEED x real time, then exits after 30 s of
++	   silence. Local test build only. */
++	{
++		static FILE* wf = nullptr; static bool tried = false; static long long fed = 0, zeros = 0;
++		static DWORD t0 = 0; static double speed = 4.0;
++		if (!tried) {
++			tried = true;
++			const char* p = getenv("EASYDRF_WAV");
++			if (p) { wf = fopen(p, "rb"); if (wf) fseek(wf, 44, SEEK_SET); t0 = GetTickCount(); }
++			const char* sp = getenv("EASYDRF_SPEED");
++			if (sp) speed = atof(sp);
++		}
++		if (wf) {
++			for (i = 0; i < iBufferSizeIn / 2; i++) {
++				short s = 0;
++				if (fread(&s, 2, 1, wf) != 1) { s = 0; zeros++; }
++				psData[2 * i] = s; psData[2 * i + 1] = s;
++			}
++			fed += iBufferSizeIn / 2;
++			double due = fed * 1000.0 / 48000.0 / speed;
++			DWORD now = GetTickCount() - t0;
++			if (due > now) Sleep((DWORD)(due - now));
++			if (zeros > 48000LL * 30) ExitProcess(0);
++			return FALSE;
++		}
++	}
++
+ 	/* Check if device must be opened or reinitialized */
+ 	if (bChangDevIn == TRUE)
+ 	{
+@@ -123,6 +213,7 @@
+ 
+ void CSound::InitRecording(int iNewBufferSize, _BOOLEAN bNewBlocking)
+ {
++	if (getenv("EASYDRF_WAV") || getenv("EASYDRF_TXWAV")) { iBufferSizeIn = iNewBufferSize; bBlockingRec = bNewBlocking; return; }
+ 	/* Check if device must be opened or reinitialized */
+ 	if (bChangDevIn == TRUE)
+ 	{
+@@ -214,6 +305,10 @@
+ 	int			iCntPrepBuf = 0;
+ 	int			iIndexDoneBuf = 0;
+ 
++	if (getenv("EASYDRF_TXWAV")) return HarnessWrite(psData);
++	/* DecHAMDRM interop harness: no sound output while reading a WAV. */
++	if (getenv("EASYDRF_WAV")) return FALSE;
++
+ 	/* Check if device must be opened or reinitialized */
+ 	if (bChangDevOut == TRUE)
+ 	{
+@@ -335,6 +430,7 @@
+ 
+ void CSound::InitPlayback(int iNewBufferSize, _BOOLEAN bNewBlocking)
+ {
++	if (getenv("EASYDRF_WAV") || getenv("EASYDRF_TXWAV")) { iBufferSizeOut = iNewBufferSize; bBlockingPlay = bNewBlocking; return; }
+ 	int	i = 0, j = 0; //inits DM
+ 
+ 	/* Check if device must be opened or reinitialized */
+--- easydrf-ref/Dialog.cpp	2026-11-16 15:08:13.064768500 +1000
++++ easydrf-build/Dialog.cpp	2026-11-16 20:15:25.053595900 +1000
+@@ -457,6 +457,47 @@
+ 	}
+ }
+ 
++
++/* DecHAMDRM interop harness, transmit side (see sound/Sound.cpp): with EASYDRF_TXWAV set
++   the program starts a transmission by itself two seconds after start-up.
++   EASYDRF_TXFILES=a;b;c sends files (RS level from settings.txt "Instances/RS"),
++   without it speech from EASYDRF_MIC is sent (EASYDRF_CODEC=speex|lpc).
++   EASYDRF_PROT=0|1 sets the MSC protection level. Local test build only. */
++void HarnessFinishTx();
++void OnCommand(HWND hwnd, int ctrlid, int code);
++void HarnessTx(void* dummy)
++{
++	Sleep(2000);
++	const char* pr = getenv("EASYDRF_PROT");
++	if (pr) DRMTransmitter.GetParameters()->SetMSCProtLev(atoi(pr));
++	const char* files = getenv("EASYDRF_TXFILES");
++	/* EASYDRF_TXBSR=file: a BSR request (plain text form) is compressed and sent twice, as the BSR window does. */
++	const char* bsr = getenv("EASYDRF_TXBSR");
++	static char bsrlist[40];
++	if (bsr) { compressBSR((char*)bsr, (char*)"bsr.bin"); strcpy(bsrlist, "bsr.bin;bsr.bin"); files = bsrlist; }
++	if (!files) {
++		const char* c = getenv("EASYDRF_CODEC");
++		if (c && !strcmp(c, "speex")) TransmParam->Service[0].AudioParam.eAudioCoding = CParameter::AC_SPEEX;
++		OnCommand(mainwindow, IDB_START, 0);
++		return;
++	}
++	char list[4000]; strncpy(list, files, sizeof(list) - 1); list[sizeof(list) - 1] = 0;
++	TXpicpospt = 0;
++	for (char* tok = strtok(list, ";"); tok && TXpicpospt < 32; tok = strtok(nullptr, ";")) {
++		strcpy(pictfile[TXpicpospt], tok);
++		const char* b = strrchr(tok, '\\'); const char* b2 = strrchr(tok, '/');
++		if (b2 > b) b = b2;
++		strcpy(filetitle[TXpicpospt], b ? b + 1 : tok);
++		FILE* f = fopen(tok, "rb");
++		if (f) { fseek(f, 0, SEEK_END); file_size[TXpicpospt] = ftell(f); fclose(f); TXpicpospt++; }
++	}
++	if (TXpicpospt == 0) HarnessFinishTx();
++	SetTXmode(TRUE);
++	IsRX2 = FALSE;
++	DRMTransmitter.Init();
++	DRMTransmitter.Send();
++}
++
+ void TxFunction(  void *dummy  )
+ {
+ 	SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_ABOVE_NORMAL);
+@@ -1477,6 +1518,8 @@
+ 		isspdisp++;
+ 		if (isspdisp >= 4) isspdisp = 0;
+ 
++		if (stoptx == 0 && getenv("EASYDRF_TXWAV")) HarnessFinishTx();
++		{ static bool hstarted = false; if (!hstarted && TX_Running && getenv("EASYDRF_TXWAV")) { hstarted = true; _beginthread(HarnessTx, 0, nullptr); } } /* after the saved settings are applied */
+ 		if (stoptx == 0) OnCommand(mainwindow, IDB_START, 0);
+ 		if (stoptx >= 0) stoptx--;
+ 
+@@ -3782,6 +3825,7 @@
+ }
+ 
+ void PTTon() {
++	if (getenv("EASYDRF_TXWAV") || getenv("EASYDRF_WAV")) return; /* harness: never key */
+ 	//check if it's off
+ 	if (PTT != TRUE) {
+ 		dotx(); //activate PTT
+--- easydrf-ref/common/datadecoding/DABMOT.cpp	2026-11-16 15:08:13.087313100 +1000
++++ easydrf-build/common/datadecoding/DABMOT.cpp	2026-11-16 16:33:49.411867300 +1000
+@@ -717,6 +717,7 @@
+ 	
+ 	bCRCOk = CRCObject.CheckCRC(vecbiNewData.Separate(16));
+ 	CRCOK = bCRCOk; //global DM
++	if (getenv("EASYDRF_WAV")) { FILE* lf = fopen("harness.log", "a"); if (lf) { fprintf(lf, "DG len %d crc %d%c", vecbiNewData.Size() / 8, (int)bCRCOk, 10); fclose(lf); } }
+ 
+ 	/* MSC data group header ------------------------------------------------ */
+ 	/* Reset bit extraction access */
+--- easydrf-ref/common/datadecoding/DataDecoder.cpp	2026-11-16 15:08:13.087313100 +1000
++++ easydrf-build/common/datadecoding/DataDecoder.cpp	2026-11-16 16:35:49.545336800 +1000
+@@ -219,6 +219,7 @@
+ 		else
+ 		{
+ 			veciCRCOk[j] = 0; /* CRC wrong */
++			if (getenv("EASYDRF_WAV")) { FILE* lf = fopen("harness.log", "a"); if (lf) { fprintf(lf, "PACKET CRC BAD "); (*pvecInputData).ResetBitAccess(); for (int q = 0; q < iTotalPacketSize; q++) fprintf(lf, "%02x", (int)(*pvecInputData).Separate(SIZEOF__BYTE)); fprintf(lf, "%c", 10); fclose(lf); } }
+ 			PostWinMessage(MS_MSC_CRC, 2); /* Red light */
+ 		}
+ 	}
+--- easydrf-ref/common/sourcedecoders/AudioSourceDecoder.cpp	2026-11-16 15:08:13.105849000 +1000
++++ easydrf-build/common/sourcedecoders/AudioSourceDecoder.cpp	2026-11-16 17:32:24.240645600 +1000
+@@ -691,6 +691,7 @@
+ 
+ 				//lpccrc = TRUE; //Unmute for testing DM
+ 
++			if (getenv("EASYDRF_WAV")) { FILE* lf = fopen("harness.log", "a"); if (lf) { fprintf(lf, "LPC blocks %d check %d%c", lpcblocksR, (int)lpccrc, 10); fclose(lf); } }
+ 			if (lpccrc)
+ 			{  // lpcblocks at 54 bytes encbytes
+ 				int j = 0;

@@ -41,7 +41,7 @@ Format specs written from those sources: `docs/spec/phy.md`, `docs/spec/app.md`.
 - Packet lengths ≥ 257 (mode A 64-QAM) hit the 8-bit PPI count wrap that every
   HamDRM receiver has; we keep the on-air behaviour (same as EasyPal).
 - TX defaults: mode B, 2.5 kHz, 16-QAM, protection 0, short interleaver, carrier 0 at
-  350 Hz (EasyDRF's receiver only searches 350 ± 5 Hz), lead-in 9 segments.
+  350 Hz (EasyDRF's receiver only searches 350 ± 5 Hz), lead-in 24 segments.
 
 ## Better-FEC modes (plan, milestone 9)
 
@@ -93,6 +93,8 @@ quality has only been checked by a spectral-distance measure, not by listening.
 - **Channel tab** (DecDRM style, `plots.rs`): |H|², group delay, impulse response with
   guard interval and estimated spread, SNR per carrier, fading map of 64 symbols.
   `--tab channel` for screenshots.
+- **Spectrum and waterfall** from a 16384-point FFT (2.9 Hz bins, a row every 50 ms),
+  asked 2026-11-16 ("way higher"): single carriers and pilots are resolved.
 - Live voice loop test (silent, cables A and B): `--example voice_loop`.
 
 ## Interop testing
@@ -101,7 +103,18 @@ quality has only been checked by a spectral-distance measure, not by listening.
 `EASYDRF_WAV=file.wav EASYDRF_SPEED=2 EasyDRF.exe` (run in `..\easydrf-build\run`) feeds
 a 48 kHz mono WAV in place of the sound card and exits after 30 s of silence; received
 files land in `run\Rx Files`. Above about 2× real time it stalls. Script:
-`out/interop.sh NAME tx-args…` (git-ignored).
+`scripts/interop/interop.sh NAME tx-args…`.
+
+The same build also transmits into a file (2026-11-16): with `EASYDRF_TXWAV=out.wav` it
+starts a transmission by itself and writes the transmit audio (after its PAPR clipper)
+to the WAV, then exits. `EASYDRF_TXFILES=a;b` sends files (mode, bandwidth, QAM,
+interleave and instances/RS level come from `settings.txt`, `EASYDRF_PROT` sets the
+protection level), `EASYDRF_TXBSR=file` sends a BSR request, and without either it
+sends voice from `EASYDRF_MIC=speech.wav` (`EASYDRF_CODEC=speex` for Speex). No sound
+device is opened and PTT is disabled in harness runs. Script:
+`scripts/interop/edtx.sh` (run in `..\easydrf-builduntx`), all 30 combinations:
+`scripts/interop/edmatrix.sh`, noise burst into a recording: `scripts/interop/gap.py`.
+All our changes to EasyDRF are in `docs/interop/easydrf-harness.patch`.
 
 ## Milestones
 
@@ -119,8 +132,8 @@ files land in `run\Rx Files`. Above about 2× real time it stalls. Script:
    (`--example cable_loop`).
 7. [~] Waterfall text (EasyDRF style) done; QSSTV FSK ID not done (QSSTV only sends it
    after analogue SSTV, so low priority).
-8. [ ] Digital voice (EasyDRF LPC-10 HVDI / Speex framing, app.md §7; our own with
-   Codec2 from DecDSSS or Opus).
+8. [~] Digital voice: neural (Mimi) and EasyDRF LPC-10 done, both directions against
+   EasyDRF for LPC-10; Speex not done.
 9. [ ] Better-FEC modes (see above).
 10. [~] CI, release workflow, portable exes done; release not cut.
 
@@ -130,12 +143,25 @@ files land in `run\Rx Files`. Above about 2× real time it stalls. Script:
   (2026-11-16). With a 9-segment lead-in, B 2.3 kHz 64-QAM p0 sometimes lost both MOT
   headers because EasyDRF locks slowly in that mode; default lead-in is now 24 segments
   (EasyDRF's own startup value) and the leader repeats for small files.
-- EasyDRF/EasyPal TX → our RX: **not yet tested** (needs EasyDRF's transmit path
-  automated, or a recording from the user).
+- EasyDRF TX → our RX (2026-11-16, EasyDRF's own transmitter into a WAV, see above):
+  - pictures: all 30 mode/bandwidth/QAM/protection combinations byte-exact; long
+    interleave; three files in one transmission (one of them 19 bytes);
+  - EasyDRF's RS levels 1–4 byte-exact, and still byte-exact with a noise burst of
+    2 / 4 / 8 / 14 s cut into the RS1 / RS2 / RS3 / RS4 recording (RS3: file rebuilt
+    from 71 of 82 segments), so the erasure decoder agrees with EasyDRF's encoder;
+  - BSR request as EasyDRF sends it (run-compressed, twice) parsed;
+  - LPC-10 voice: 34–36 good frames, 0 bad, in six mode combinations (not listened to);
+  - Speex voice: recognised and reported as not supported.
+  EasyDRF's clipper limits the MER we measure on its signal to about 14 dB (4-QAM),
+  22 dB (16-QAM) and 28 dB (64-QAM); that is its design, not a receiver fault.
+- EasyPal itself and QSSTV → our RX: **not tested** (no transmitter of theirs here;
+  needs a recording). EasyPal's `.rsN` files are only verified against our own encoder
+  and through EasyDRF's receiver.
 
 ## Open items
 
-- Test vectors from real EasyPal / EasyDRF transmissions (RX interop, EasyDRF RS).
-- JPEG 2000 display in the GUI (EasyPal sends `.jp2`; files are saved, not shown).
+- A recording of a real EasyPal (or QSSTV) transmission for RX interop.
+- EasyDRF's Speex voice mode and the text message in voice frames.
+- A BSR request that is repeated on air is reported once per copy.
 - Receiver status after the signal ends keeps the last figures (MER from noise-only
   symbols); show "signal lost" instead.

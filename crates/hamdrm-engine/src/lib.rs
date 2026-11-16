@@ -278,6 +278,7 @@ struct Worker {
     voice_view: Option<VoiceView>,
     speaker: Option<OutputStream>,
     neural_failed: bool,
+    unsupported_voice_logged: bool,
     quit: bool,
 }
 
@@ -306,6 +307,7 @@ impl Worker {
             voice_view: None,
             speaker: None,
             neural_failed: false,
+            unsupported_voice_logged: false,
             quit: false,
             opts,
             view,
@@ -814,7 +816,13 @@ impl Worker {
         let key = match (coding, ext) {
             (AudioCoding::Lpc, _) => VoiceKey::Lpc10,
             (AudioCoding::Celp, EXT_NEURAL_VOICE) => VoiceKey::Neural,
-            _ => return,
+            _ => {
+                if !self.unsupported_voice_logged {
+                    self.unsupported_voice_logged = true;
+                    self.log(format!("voice heard in {coding:?} coding: not supported"));
+                }
+                return;
+            }
         };
         if self.rx_voice.as_ref().map(|(k, _)| *k) != Some(key) {
             let codec: Box<dyn VoiceCodec> = match key {

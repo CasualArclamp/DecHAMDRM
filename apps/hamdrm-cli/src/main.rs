@@ -230,6 +230,7 @@ fn rx(a: RxArgs) -> Result<()> {
     let mut saved = 0;
     let mut service: Option<(Service, u8)> = None;
     let mut vcodec: Option<Box<dyn VoiceCodec>> = None;
+    let mut voice_warned = false;
     let mut voice_out: Vec<f32> = Vec::new();
     let (mut vgood, mut vbad) = (0, 0);
     for chunk in samples.chunks(block) {
@@ -259,7 +260,13 @@ fn rx(a: RxArgs) -> Result<()> {
                                     Some(Box::new(hamdrm_voice::easydrf::EasyDrfLpc::new()))
                                 }
                                 (AudioCoding::Celp, EXT_NEURAL_VOICE) => Some(neural()?),
-                                _ => None,
+                                _ => {
+                                    if !voice_warned {
+                                        voice_warned = true;
+                                        eprintln!("voice: {coding:?} coding is not supported");
+                                    }
+                                    None
+                                }
                             };
                             if let Some(c) = &vcodec {
                                 eprintln!("voice: {}", c.name());
