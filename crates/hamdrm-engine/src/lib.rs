@@ -905,8 +905,9 @@ impl Worker {
         let mut v = self.view.lock().unwrap_or_else(|e| e.into_inner());
         v.status = self.rx.status().clone();
         v.chain = vis.chain;
-        v.spectrum_db = vis.spectrum_db;
-        v.spectrum_bin_hz = vis.spectrum_bin_hz;
+        // The trace comes from the waterfall's high-resolution FFT (2.9 Hz bins).
+        v.spectrum_db = self.wf.spectrum_db();
+        v.spectrum_bin_hz = waterfall::BIN_HZ;
         v.signal_band_hz = vis.signal_band_hz;
         v.dc_hz = vis.dc_hz;
         for r in self.new_rows.drain(..) {

@@ -85,7 +85,7 @@ struct App {
     shot: Option<Shot>,
 }
 
-const WF_COLS: usize = 300;
+const WF_COLS: usize = 1200;
 const WF_ROWS: usize = 300;
 
 impl App {
@@ -152,9 +152,15 @@ impl App {
         for i in 0..take {
             let row = &self.view.waterfall[rows - 1 - i];
             for x in 0..WF_COLS {
-                let hz = x as f64 / WF_COLS as f64 * 3500.0;
-                let b = ((hz / bin) as usize).min(row.len().saturating_sub(1));
-                let db = row.get(b).copied().unwrap_or(-140.0);
+                // Strongest bin under this pixel, so narrow lines are never skipped.
+                let last = row.len().saturating_sub(1);
+                let b0 = ((x as f64 / WF_COLS as f64 * 3500.0 / bin) as usize).min(last);
+                let b1 = (((x + 1) as f64 / WF_COLS as f64 * 3500.0 / bin) as usize)
+                    .clamp(b0 + 1, last + 1);
+                let db = row
+                    .get(b0..b1)
+                    .and_then(|s| s.iter().copied().reduce(f32::max))
+                    .unwrap_or(-140.0);
                 let t = ((f64::from(db) - self.wf_floor + 4.0) / 45.0).clamp(0.0, 1.0);
                 self.wf_pixels[i * WF_COLS + x] = self.palette[(t * 255.0) as usize];
             }
