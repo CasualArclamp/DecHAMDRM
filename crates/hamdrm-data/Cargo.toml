@@ -9,3 +9,4 @@ rust-version.workspace = true
 
 [dependencies]
 decdrm-core.workspace = true
+lzma-rs = "0.3"

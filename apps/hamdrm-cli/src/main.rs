@@ -7,7 +7,9 @@
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
 use hamdrm_core::params::{Bandwidth, Interleave, Layout, Mode, MscConfig, Qam, SAMPLE_RATE};
+use hamdrm_core::rx::{Receiver, ReceiverConfig, ReceiverEvent};
 use hamdrm_core::tx::{Transmitter, TxConfig};
+use hamdrm_data::receive::{FileEvent, FileReceiver};
 use hamdrm_data::send::{OutFile, SendConfig, frames};
 use std::path::PathBuf;
 
@@ -22,6 +24,20 @@ struct Cli {
 enum Cmd {
     /// Encode files into a HamDRM transmission WAV.
     Tx(TxArgs),
+    /// Decode a recording (48 kHz WAV) and save the received files.
+    Rx(RxArgs),
+}
+
+#[derive(clap::Args)]
+struct RxArgs {
+    /// Recording (WAV, 48 kHz).
+    input: PathBuf,
+    /// Where to save received files.
+    #[arg(long, default_value = "rx")]
+    out_dir: PathBuf,
+    /// Print every FAC and MSC frame.
+    #[arg(long, short)]
+    verbose: bool,
 }
 
 #[derive(clap::Args)]
@@ -136,8 +152,77 @@ fn tx(a: TxArgs) -> Result<()> {
     Ok(())
 }
 
+fn rx(a: RxArgs) -> Result<()> {
+    let mut r = hound::WavReader::open(&a.input).with_context(|| format!("opening {}", a.input.display()))?;
+    let spec = r.spec();
+    if spec.sample_rate != SAMPLE_RATE {
+        bail!("{} Hz: only 48 kHz recordings for now", spec.sample_rate);
+    }
+    let samples: Vec<f32> = match spec.sample_format {
+        hound::SampleFormat::Float => r.samples::<f32>().collect::<Result<_, _>>()?,
+        hound::SampleFormat::Int => {
+            let scale = 1.0 / (1u64 << (spec.bits_per_sample - 1)) as f32;
+            r.samples::<i32>().map(|s| s.map(|v| v as f32 * scale)).collect::<Result<_, _>>()?
+        }
+    };
+    let cfg = ReceiverConfig { channels: usize::from(spec.channels), ..Default::default() };
+    let mut rx = Receiver::new(cfg);
+    let mut files = FileReceiver::new();
+    std::fs::create_dir_all(&a.out_dir)?;
+    let block = 4800 * usize::from(spec.channels);
+    let mut saved = 0;
+    for chunk in samples.chunks(block) {
+        for ev in rx.push(chunk) {
+            match ev {
+                ReceiverEvent::SignalFound { dc_hz } => eprintln!("signal: DC at {dc_hz:.1} Hz"),
+                ReceiverEvent::ModeDetected(m) => eprintln!("mode {m}"),
+                ReceiverEvent::Configured(c) => eprintln!("MSC: {c}"),
+                ReceiverEvent::Fac { fac, label } => {
+                    if a.verbose {
+                        eprintln!("FAC frame {} {:?} label {:?}", fac.frame, fac.service, label);
+                    }
+                }
+                ReceiverEvent::Restarted => eprintln!("sync lost, restarting"),
+                ReceiverEvent::Msc(f) => {
+                    if a.verbose {
+                        eprintln!("MSC {} bytes, FAC ok {}", f.bytes.len(), f.fac_ok);
+                    }
+                    for fe in files.push(Some(&f.bytes)) {
+                        match fe {
+                            FileEvent::Progress { name, received, total, .. } => {
+                                if a.verbose {
+                                    eprintln!("  {}: {received}/{}", name.as_deref().unwrap_or("?"), total.map_or("?".into(), |t| t.to_string()));
+                                }
+                            }
+                            FileEvent::File { name, data, rs, .. } => {
+                                let path = a.out_dir.join(&name);
+                                std::fs::write(&path, &data)?;
+                                saved += 1;
+                                eprintln!("received {} ({} bytes{})", path.display(), data.len(), rs.map(|r| format!(", {r}")).unwrap_or_default());
+                            }
+                            FileEvent::Bsr(req) => eprintln!("BSR for transport id {}: {} segments missing", req.tid, req.missing.len()),
+                        }
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let st = rx.status();
+    eprintln!(
+        "done: {saved} file(s); FAC {}/{} ok, MSC {} ok, label {:?}, SNR {:?} dB",
+        st.fac_ok,
+        st.fac_ok + st.fac_bad,
+        st.msc_ok,
+        st.label,
+        st.snr_db.map(|v| (v * 10.0).round() / 10.0)
+    );
+    Ok(())
+}
+
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Tx(a) => tx(a),
+        Cmd::Rx(a) => rx(a),
     }
 }
