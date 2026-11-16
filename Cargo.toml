@@ -22,6 +22,8 @@ clap = { version = "4.6", features = ["derive"] }
 hamdrm-core = { path = "crates/hamdrm-core" }
 hamdrm-data = { path = "crates/hamdrm-data" }
 hamdrm-engine = { path = "crates/hamdrm-engine" }
+hamdrm-voice = { path = "crates/hamdrm-voice" }
+hamdrm-neural = { path = "crates/hamdrm-neural" }
 # Sound cards and transmitter keying (IC-7300 CI-V, FT-710, rigctld, DTR/RTS) from DecDSSS.
 decdsss-audio = { git = "https://github.com/CasualArclamp/DecDSSS", tag = "v0.0.9" }
 decdsss-rig = { git = "https://github.com/CasualArclamp/DecDSSS", tag = "v0.0.9" }

@@ -8,6 +8,7 @@
 //!
 //! `dechamdrm-gui [FILE.wav [--speed X]] [--out-dir DIR] [--screenshot OUT.png --after SECS]`
 
+mod plots;
 mod prefs;
 mod theme;
 
@@ -18,7 +19,7 @@ use eframe::egui::{
 use hamdrm_engine::decdsss_rig::{self, Method, Model};
 use hamdrm_engine::{
     Bandwidth, Command, Engine, Input, Interleave, Layout, Mode, MscConfig, Options, PttConfig,
-    Qam, ReceiverConfig, RxState, TxSettings, View,
+    Qam, ReceiverConfig, RxState, TxSettings, View, VoiceKind,
 };
 use prefs::Prefs;
 use std::collections::HashMap;
@@ -26,13 +27,16 @@ use std::path::PathBuf;
 use std::time::Instant;
 use theme::*;
 
-/// Points kept for the constellation trail.
-const TRAIL: usize = 2400;
-
 struct Shot {
     path: PathBuf,
     after: f64,
     requested: Option<Instant>,
+}
+
+#[derive(PartialEq, Clone, Copy)]
+enum CentreTab {
+    Picture,
+    Channel,
 }
 
 struct App {
@@ -47,7 +51,11 @@ struct App {
     wf_seen: u64,
     wf_floor: f64,
     palette: Vec<Color32>,
-    trail: std::collections::VecDeque<egui::Pos2>,
+    fading_tex: Option<TextureHandle>,
+    centre_tab: CentreTab,
+    voice_on: bool,
+    voice_since: Option<Instant>,
+    downloading: Option<std::thread::JoinHandle<Result<PathBuf, String>>>,
     images: HashMap<PathBuf, Option<(TextureHandle, [usize; 2])>>,
     viewing: Option<PathBuf>,
     files_seen: usize,
@@ -83,6 +91,17 @@ impl App {
             lead_in: p.lead_in,
             dc_freq: p.dc_freq,
             rms: p.level,
+        }
+    }
+
+    /// After pressing Talk the engine needs a moment to start the job.
+    fn voice_grace(&mut self) -> bool {
+        match self.voice_since {
+            Some(t) => t.elapsed().as_secs_f64() > 1.5,
+            None => {
+                self.voice_since = Some(Instant::now());
+                false
+            }
         }
     }
 
@@ -292,7 +311,21 @@ impl App {
                 row(ui, "Packet CRC errors", self.view.crc_errors.to_string());
             });
         ui.add_space(6.0);
-        self.constellation(ui);
+        self.constellations(ui);
+        if let Some(v) = &self.view.voice {
+            ui.add_space(6.0);
+            heading(ui, "Voice");
+            ui.label(
+                RichText::new(format!(
+                    "{}  {}  good {} / bad {}",
+                    v.codec,
+                    if v.active { "▶" } else { "·" },
+                    v.good,
+                    v.bad
+                ))
+                .color(if v.active { GOOD } else { DIM }),
+            );
+        }
         ui.add_space(6.0);
         heading(ui, "Receiving");
         let mut objs = self.view.objects.clone();
@@ -325,48 +358,18 @@ impl App {
         }
     }
 
-    fn constellation(&mut self, ui: &mut Ui) {
-        let w = ui.available_width().min(260.0);
-        let (rect, _) = ui.allocate_exact_size(vec2(w, w), Sense::hover());
-        let p = ui.painter_at(rect);
-        p.rect_filled(rect, 4.0, WELL);
-        p.line_segment(
-            [
-                pos2(rect.center().x, rect.top()),
-                pos2(rect.center().x, rect.bottom()),
-            ],
-            Stroke::new(1.0, AXIS),
-        );
-        p.line_segment(
-            [
-                pos2(rect.left(), rect.center().y),
-                pos2(rect.right(), rect.center().y),
-            ],
-            Stroke::new(1.0, AXIS),
-        );
-        let scale = w as f64 / 2.0 / 1.5;
-        for c in &self.view.msc_constellation {
-            let q = pos2(
-                rect.center().x + (c.re * scale) as f32,
-                rect.center().y - (c.im * scale) as f32,
-            );
-            if rect.contains(q) {
-                self.trail.push_back(q);
-            }
-        }
-        while self.trail.len() > TRAIL {
-            self.trail.pop_front();
-        }
-        for q in &self.trail {
-            p.circle_filled(*q, 1.2, DOT);
-        }
-        p.text(
-            rect.left_top() + vec2(6.0, 4.0),
-            Align2::LEFT_TOP,
-            "MSC",
-            FontId::proportional(11.0),
-            DIM,
-        );
+    /// FAC (4-QAM) and MSC constellations side by side, the receiver's rolling window
+    /// of the latest cells, redrawn every display frame.
+    fn constellations(&mut self, ui: &mut Ui) {
+        let side = ((ui.available_width() - 6.0) / 2.0).min(150.0);
+        let msc_range = match self.view.status.msc.map(|m| m.qam) {
+            Some(Qam::Qam4) => 1.2,
+            _ => 1.4,
+        };
+        ui.horizontal(|ui| {
+            plots::constellation(ui, "FAC", &self.view.chain.fac, side, 1.2);
+            plots::constellation(ui, "MSC", &self.view.chain.msc, side, msc_range);
+        });
     }
 
     // ---------------------------------------------------------------- band
@@ -612,6 +615,40 @@ impl App {
                 );
             }
         }
+        // Voice
+        ui.add_space(6.0);
+        heading(ui, "Voice");
+        ui.horizontal(|ui| {
+            ui.selectable_value(
+                &mut self.prefs.voice,
+                VoiceKind::Neural,
+                "Neural (DecHAMDRM)",
+            );
+            ui.selectable_value(&mut self.prefs.voice, VoiceKind::Lpc10, "LPC-10 (EasyDRF)");
+        });
+        let neural_missing = self.prefs.voice == VoiceKind::Neural && !self.view.neural_ready;
+        if neural_missing {
+            ui.label(RichText::new("neural voice weights not downloaded (Settings)").color(WARN));
+        }
+        let voice_busy = busy && !self.voice_on;
+        let talk = ui.add_enabled(
+            !voice_busy && !neural_missing,
+            egui::Button::new(
+                RichText::new(if self.voice_on {
+                    "■ Stop talking"
+                } else {
+                    "● Talk"
+                })
+                .strong(),
+            )
+            .selected(self.voice_on),
+        );
+        if talk.clicked() {
+            self.voice_on = !self.voice_on;
+            self.voice_since = None;
+            self.engine
+                .send(Command::Voice(self.voice_on, s.clone(), self.prefs.voice));
+        }
         // BSR requests
         if !self.view.bsrs.is_empty() {
             ui.add_space(6.0);
@@ -833,6 +870,47 @@ impl App {
                             );
                         });
                         ui.end_row();
+                        ui.label("Microphone");
+                        combo(
+                            ui,
+                            "mic",
+                            &mut self.prefs.mic,
+                            &self.inputs,
+                            "system default",
+                        );
+                        ui.end_row();
+                        ui.label("Mic gain");
+                        ui.add(
+                            egui::Slider::new(&mut self.prefs.mic_gain, 0.1..=8.0)
+                                .logarithmic(true),
+                        );
+                        ui.end_row();
+                        ui.label("Voice to");
+                        combo(
+                            ui,
+                            "spk",
+                            &mut self.prefs.speaker,
+                            &self.outputs,
+                            "system default",
+                        );
+                        ui.end_row();
+                        ui.label("Neural voice");
+                        ui.horizontal(|ui| {
+                            if self.view.neural_ready {
+                                ui.label(RichText::new("weights present").color(GOOD));
+                            } else if self.downloading.is_some() {
+                                ui.spinner();
+                                ui.label("downloading 385 MB…");
+                            } else if ui
+                                .button("Download weights (385 MB, kyutai/mimi)")
+                                .clicked()
+                            {
+                                self.downloading = Some(std::thread::spawn(
+                                    hamdrm_engine::download_neural_weights,
+                                ));
+                            }
+                        });
+                        ui.end_row();
                         ui.label("BSR");
                         ui.checkbox(
                             &mut self.prefs.auto_bsr,
@@ -859,6 +937,11 @@ impl App {
             self.engine
                 .send(Command::SetOutput(none_if_empty(&self.prefs.output)));
             self.engine.send(Command::SetPtt(self.prefs.ptt.clone()));
+            self.engine.send(Command::SetAudioDevices {
+                mic: none_if_empty(&self.prefs.mic),
+                speaker: none_if_empty(&self.prefs.speaker),
+                mic_gain: self.prefs.mic_gain,
+            });
             if self.save_prefs {
                 self.prefs.save();
             }
@@ -874,8 +957,29 @@ impl eframe::App for App {
             self.viewing = self.view.files.last().map(|f| f.path.clone());
         }
         self.update_waterfall(ctx);
+        if self.downloading.as_ref().is_some_and(|h| h.is_finished())
+            && let Some(h) = self.downloading.take()
+        {
+            match h.join() {
+                Ok(Ok(p)) => eprintln!("weights saved to {}", p.display()),
+                Ok(Err(e)) => eprintln!("download failed: {e}"),
+                Err(_) => {}
+            }
+        }
+        // A voice transmission the engine ended (or refused) releases the button.
+        if self.voice_on
+            && self
+                .view
+                .tx
+                .as_ref()
+                .is_none_or(|t| !t.what.starts_with("voice"))
+            && self.voice_grace()
+        {
+            self.voice_on = false;
+        }
         self.screenshot(ctx);
-        ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        // Every display frame: the constellations follow the signal symbol by symbol.
+        ctx.request_repaint();
     }
 
     fn ui(&mut self, ui: &mut Ui, _frame: &mut eframe::Frame) {
@@ -919,7 +1023,19 @@ impl eframe::App for App {
                 let h = (ui.available_height() * 0.45).max(220.0);
                 self.band(ui, h);
                 ui.add_space(6.0);
-                self.viewer(ui, &ctx);
+                ui.horizontal(|ui| {
+                    ui.selectable_value(&mut self.centre_tab, CentreTab::Picture, "Picture");
+                    ui.selectable_value(&mut self.centre_tab, CentreTab::Channel, "Channel");
+                });
+                match self.centre_tab {
+                    CentreTab::Picture => self.viewer(ui, &ctx),
+                    CentreTab::Channel => plots::channel_tab(
+                        ui,
+                        &self.view.chain,
+                        &mut self.fading_tex,
+                        &self.palette,
+                    ),
+                }
             });
         if self.show_settings {
             self.settings_window(&ctx);
@@ -1072,6 +1188,7 @@ fn main() -> eframe::Result {
         return Ok(());
     }
     let mut args = std::env::args().skip(1);
+    let mut start_channel = false;
     let (mut file, mut speed, mut out_dir, mut shot_path, mut after) =
         (None, 1.0, None, None, 10.0);
     while let Some(a) = args.next() {
@@ -1079,6 +1196,7 @@ fn main() -> eframe::Result {
             "--speed" => speed = args.next().and_then(|v| v.parse().ok()).unwrap_or(1.0),
             "--out-dir" => out_dir = args.next().map(PathBuf::from),
             "--screenshot" => shot_path = args.next().map(PathBuf::from),
+            "--tab" => start_channel = args.next().as_deref() == Some("channel"),
             "--after" => after = args.next().and_then(|v| v.parse().ok()).unwrap_or(10.0),
             _ => file = Some(PathBuf::from(a)),
         }
@@ -1115,6 +1233,13 @@ fn main() -> eframe::Result {
         out_dir: prefs.out_dir.clone(),
         rx: ReceiverConfig::default(),
         auto_bsr: prefs.auto_bsr,
+        mic: none_if_empty(&prefs.mic),
+        speaker: if unattended {
+            Some(String::new())
+        } else {
+            none_if_empty(&prefs.speaker)
+        },
+        mic_gain: prefs.mic_gain,
     };
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -1140,7 +1265,15 @@ fn main() -> eframe::Result {
                 wf_seen: 0,
                 wf_floor: -1000.0,
                 palette: palette(),
-                trail: Default::default(),
+                fading_tex: None,
+                centre_tab: if start_channel {
+                    CentreTab::Channel
+                } else {
+                    CentreTab::Picture
+                },
+                voice_on: false,
+                voice_since: None,
+                downloading: None,
                 images: HashMap::new(),
                 viewing: None,
                 files_seen: 0,

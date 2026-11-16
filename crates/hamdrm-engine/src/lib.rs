@@ -11,15 +11,17 @@ pub use decdsss_rig::{
     Config as PttConfig, Method as PttMethod, Model as RigModel, Status as PttStatus,
 };
 pub use hamdrm_core::params::{Bandwidth, Interleave, Layout, Mode, MscConfig, Qam};
-pub use hamdrm_core::rx::{ReceiverConfig, RxState, RxStatus};
+pub use hamdrm_core::rx::{ChainVisuals, PdsAxis, ReceiverConfig, RxState, RxStatus};
 pub use hamdrm_data::bsr::BsrRequest;
 pub use tx::TxSettings;
 
 use decdsss_audio::{InputOptions, InputStream, OutputOptions, OutputStream};
 use decdsss_rig::Ptt;
-use hamdrm_core::Cplx;
+pub use hamdrm_core::Cplx;
+use hamdrm_core::fac::{AudioCoding, EXT_NEURAL_VOICE, Service};
 use hamdrm_core::rx::{Receiver, ReceiverEvent};
 use hamdrm_data::receive::{FileEvent, FileReceiver};
+use hamdrm_voice::VoiceCodec;
 use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver as ChanRx, Sender, channel};
@@ -59,6 +61,30 @@ pub struct Options {
     pub rx: ReceiverConfig,
     /// Send repairs for BSRs about our own files without asking.
     pub auto_bsr: bool,
+    /// Microphone for voice transmissions (`None` = system default input).
+    pub mic: Option<String>,
+    /// Loudspeaker for received voice (`None` = system default; `Some("")` = none).
+    pub speaker: Option<String>,
+    /// Microphone gain (linear).
+    pub mic_gain: f32,
+}
+
+/// Which voice codec to transmit with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum VoiceKind {
+    /// EasyDRF's LPC-10 (EasyDRF can receive it).
+    Lpc10,
+    /// DecHAMDRM neural voice (Mimi): better sound, only DecHAMDRM receives it.
+    Neural,
+}
+
+/// Received digital voice.
+#[derive(Debug, Clone, Default)]
+pub struct VoiceView {
+    pub codec: String,
+    pub good: u64,
+    pub bad: u64,
+    pub active: bool,
 }
 
 /// What the UI can ask for.
@@ -77,6 +103,13 @@ pub enum Command {
     SetInput(Input),
     SetPtt(PttConfig),
     SetOutput(Option<String>),
+    /// Voice transmission on (start) or off (flush and stop).
+    Voice(bool, TxSettings, VoiceKind),
+    SetAudioDevices {
+        mic: Option<String>,
+        speaker: Option<String>,
+        mic_gain: f32,
+    },
     Quit,
 }
 
@@ -125,7 +158,8 @@ pub struct TxView {
 #[derive(Debug, Clone, Default)]
 pub struct View {
     pub status: RxStatus,
-    pub msc_constellation: Vec<Cplx>,
+    /// Constellations, channel estimate, impulse response, per-carrier SNR.
+    pub chain: ChainVisuals,
     pub spectrum_db: Vec<f64>,
     pub spectrum_bin_hz: f64,
     pub signal_band_hz: Option<(f64, f64)>,
@@ -150,6 +184,9 @@ pub struct View {
     pub crc_errors: u64,
     /// File input finished.
     pub eof: bool,
+    pub voice: Option<VoiceView>,
+    /// Neural voice weights present.
+    pub neural_ready: bool,
 }
 
 /// Handle to the worker thread.
@@ -235,6 +272,12 @@ struct Worker {
     bsrs: Vec<BsrSeen>,
     input_db: f64,
     last_settings: TxSettings,
+    /// Service and FAC extension byte of the newest good FAC.
+    service: Option<(Service, u8)>,
+    rx_voice: Option<(VoiceKey, Box<dyn VoiceCodec>)>,
+    voice_view: Option<VoiceView>,
+    speaker: Option<OutputStream>,
+    neural_failed: bool,
     quit: bool,
 }
 
@@ -258,6 +301,11 @@ impl Worker {
             bsrs: Vec::new(),
             input_db: -120.0,
             last_settings: TxSettings::default(),
+            service: None,
+            rx_voice: None,
+            voice_view: None,
+            speaker: None,
+            neural_failed: false,
             quit: false,
             opts,
             view,
@@ -463,6 +511,22 @@ impl Worker {
                 }
             }
             Command::StopTx => self.stop_tx(),
+            Command::Voice(true, s, kind) => self.start_voice(s, kind),
+            Command::Voice(false, ..) => {
+                if let Some(j) = self.job.as_mut().filter(|j| j.is_voice()) {
+                    j.stop_voice();
+                }
+            }
+            Command::SetAudioDevices {
+                mic,
+                speaker,
+                mic_gain,
+            } => {
+                self.opts.mic = mic;
+                self.opts.speaker = speaker;
+                self.opts.mic_gain = mic_gain;
+                self.speaker = None;
+            }
             Command::SetInput(i) => self.open_input(i),
             Command::SetPtt(p) => {
                 self.opts.ptt = p.clone();
@@ -560,11 +624,12 @@ impl Worker {
     fn receive_step(&mut self) {
         let block = match &mut self.source {
             Source::Sound(s) => {
-                if s.available_frames() < 2400 {
-                    std::thread::sleep(Duration::from_millis(10));
+                // 40 ms blocks: the plots follow the signal symbol by symbol.
+                if s.available_frames() < 1920 {
+                    std::thread::sleep(Duration::from_millis(5));
                     return;
                 }
-                s.read(4800)
+                s.read(1920)
             }
             Source::File {
                 samples,
@@ -584,7 +649,7 @@ impl Worker {
                         return;
                     }
                 }
-                let end = (*pos + 4800).min(samples.len());
+                let end = (*pos + 1920).min(samples.len());
                 let b = samples[*pos..end].to_vec();
                 *pos = end;
                 b
@@ -610,18 +675,31 @@ impl Worker {
         match ev {
             ReceiverEvent::SignalFound { dc_hz } => self.log(format!("signal at {dc_hz:.0} Hz")),
             ReceiverEvent::Configured(c) => self.log(format!("receiving {c}")),
-            ReceiverEvent::Fac { label: Some(l), .. } => {
-                if self.heard.as_deref() != Some(&l) && !l.is_empty() {
+            ReceiverEvent::Fac { fac, label } => {
+                self.service = Some((fac.service, fac.ext));
+                if let Some(l) = label
+                    && self.heard.as_deref() != Some(&l)
+                    && !l.is_empty()
+                {
                     self.log(format!("station {l}"));
                     self.heard = Some(l);
                 }
             }
-            ReceiverEvent::Restarted => {}
-            ReceiverEvent::Msc(f) => {
-                for fe in self.files.push(Some(&f.bytes)) {
-                    self.file_event(fe);
+            ReceiverEvent::Restarted => {
+                if let Some(v) = &mut self.voice_view {
+                    v.active = false;
                 }
             }
+            ReceiverEvent::Msc(f) => match self.service {
+                Some((Service::Audio { coding, .. }, ext)) => {
+                    self.voice_frame(&f.bytes, coding, ext)
+                }
+                _ => {
+                    for fe in self.files.push(Some(&f.bytes)) {
+                        self.file_event(fe);
+                    }
+                }
+            },
             _ => {}
         }
     }
@@ -675,6 +753,134 @@ impl Worker {
         }
     }
 
+    fn start_voice(&mut self, s: TxSettings, kind: VoiceKind) {
+        if self.job.is_some() {
+            self.log("busy transmitting");
+            return;
+        }
+        let (codec, service, ext): (Box<dyn VoiceCodec>, Service, u8) = match kind {
+            VoiceKind::Lpc10 => (
+                Box::new(hamdrm_voice::easydrf::EasyDrfLpc::new()),
+                Service::Audio {
+                    coding: AudioCoding::Lpc,
+                    text: false,
+                },
+                0,
+            ),
+            VoiceKind::Neural => match load_neural() {
+                Ok(c) => (
+                    c,
+                    Service::Audio {
+                        coding: AudioCoding::Celp,
+                        text: false,
+                    },
+                    EXT_NEURAL_VOICE,
+                ),
+                Err(e) => {
+                    self.log(format!("neural voice: {e}"));
+                    return;
+                }
+            },
+        };
+        let o = InputOptions {
+            device: self.opts.mic.clone(),
+            sample_rate: Some(RATE),
+            channels: Some(1),
+            ..Default::default()
+        };
+        let mic = match InputStream::open(&o) {
+            Ok(m) if m.format().sample_rate == RATE => m,
+            Ok(m) => {
+                self.log(format!(
+                    "microphone {} runs at {} Hz; 48 kHz needed",
+                    m.device_name(),
+                    m.format().sample_rate
+                ));
+                return;
+            }
+            Err(e) => {
+                self.log(format!("microphone: {e}"));
+                return;
+            }
+        };
+        let what = format!("voice ({}) from {}", codec.name(), mic.device_name());
+        self.last_settings = s.clone();
+        let job = TxJob::voice(&s, codec, mic, service, ext, self.opts.mic_gain);
+        self.start_job(job, what);
+    }
+
+    /// One MSC frame of an audio service: decode and play.
+    fn voice_frame(&mut self, bytes: &[u8], coding: AudioCoding, ext: u8) {
+        let key = match (coding, ext) {
+            (AudioCoding::Lpc, _) => VoiceKey::Lpc10,
+            (AudioCoding::Celp, EXT_NEURAL_VOICE) => VoiceKey::Neural,
+            _ => return,
+        };
+        if self.rx_voice.as_ref().map(|(k, _)| *k) != Some(key) {
+            let codec: Box<dyn VoiceCodec> = match key {
+                VoiceKey::Lpc10 => Box::new(hamdrm_voice::easydrf::EasyDrfLpc::new()),
+                VoiceKey::Neural => {
+                    if self.neural_failed {
+                        return;
+                    }
+                    match load_neural() {
+                        Ok(c) => c,
+                        Err(e) => {
+                            self.neural_failed = true;
+                            self.log(format!("neural voice heard, but {e}"));
+                            return;
+                        }
+                    }
+                }
+            };
+            self.log(format!("receiving voice: {}", codec.name()));
+            self.voice_view = Some(VoiceView {
+                codec: codec.name().into(),
+                ..Default::default()
+            });
+            self.rx_voice = Some((key, codec));
+        }
+        let bits: Vec<u8> = bytes
+            .iter()
+            .flat_map(|b| (0..8).rev().map(move |i| (b >> i) & 1))
+            .collect();
+        let (_, codec) = self.rx_voice.as_mut().expect("set above");
+        let out = codec.decode(&bits);
+        let view = self.voice_view.get_or_insert_with(Default::default);
+        view.active = true;
+        let pcm = match out {
+            Some(p) => {
+                view.good += 1;
+                p
+            }
+            None => {
+                view.bad += 1;
+                vec![0.0; hamdrm_voice::SAMPLES_PER_FRAME]
+            }
+        };
+        if self.speaker.is_none() && self.opts.speaker.as_deref() != Some("") {
+            let o = OutputOptions {
+                device: self.opts.speaker.clone(),
+                sample_rate: Some(RATE),
+                channels: Some(1),
+                buffer: Duration::from_secs(3),
+                start_threshold: Duration::from_millis(300),
+            };
+            match OutputStream::open(&o) {
+                Ok(s) if s.format().sample_rate == RATE => self.speaker = Some(s),
+                Ok(s) => self.log(format!(
+                    "speaker {} runs at {} Hz; 48 kHz needed",
+                    s.device_name(),
+                    s.format().sample_rate
+                )),
+                Err(e) => self.log(format!("speaker: {e}")),
+            }
+        }
+        if let Some(s) = &mut self.speaker {
+            let _ = s.write(&pcm);
+        }
+    }
+
     fn publish(&mut self) {
         let vis = self.rx.visuals();
         let objects: Vec<ObjectView> = self
@@ -698,7 +904,7 @@ impl Worker {
             .collect();
         let mut v = self.view.lock().unwrap_or_else(|e| e.into_inner());
         v.status = self.rx.status().clone();
-        v.msc_constellation = vis.chain.msc;
+        v.chain = vis.chain;
         v.spectrum_db = vis.spectrum_db;
         v.spectrum_bin_hz = vis.spectrum_bin_hz;
         v.signal_band_hz = vis.signal_band_hz;
@@ -723,6 +929,8 @@ impl Worker {
         v.ptt = Some(self.ptt.status());
         v.heard.clone_from(&self.heard);
         v.crc_errors = self.files.crc_errors();
+        v.voice.clone_from(&self.voice_view);
+        v.neural_ready = neural_weights().is_some();
     }
 }
 
@@ -805,4 +1013,51 @@ pub fn estimate_seconds(s: &TxSettings, size: usize) -> f64 {
     };
     let frames = body.div_ceil(seg) + s.lead_in.min(body.div_ceil(seg)) + 4;
     frames as f64 * 0.4 + 0.4
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum VoiceKey {
+    Lpc10,
+    Neural,
+}
+
+/// The neural-voice weights, if present.
+pub fn neural_weights() -> Option<PathBuf> {
+    #[cfg(feature = "neural")]
+    {
+        hamdrm_neural::find_weights()
+    }
+    #[cfg(not(feature = "neural"))]
+    {
+        None
+    }
+}
+
+/// Fetch the neural-voice weights into the per-user models folder.
+pub fn download_neural_weights() -> Result<PathBuf, String> {
+    #[cfg(feature = "neural")]
+    {
+        let dir = hamdrm_neural::weight_dirs()
+            .into_iter()
+            .find(|d| d.ends_with("DecHAMDRM\\models") || d.ends_with("DecHAMDRM/models"))
+            .unwrap_or_else(|| PathBuf::from("models"));
+        hamdrm_neural::download(&dir)
+    }
+    #[cfg(not(feature = "neural"))]
+    {
+        Err("this build has no neural voice".into())
+    }
+}
+
+fn load_neural() -> Result<Box<dyn VoiceCodec>, String> {
+    #[cfg(feature = "neural")]
+    {
+        let w = hamdrm_neural::find_weights()
+            .ok_or("the neural voice weights are missing (Settings → Download, or `dechamdrm models download`)")?;
+        Ok(Box::new(hamdrm_neural::MimiVoice::load(&w)?))
+    }
+    #[cfg(not(feature = "neural"))]
+    {
+        Err("this build has no neural voice".into())
+    }
 }

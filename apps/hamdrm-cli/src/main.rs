@@ -6,11 +6,13 @@
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
+use hamdrm_core::fac::{AudioCoding, EXT_NEURAL_VOICE, Service};
 use hamdrm_core::params::{Bandwidth, Interleave, Layout, Mode, MscConfig, Qam, SAMPLE_RATE};
 use hamdrm_core::rx::{Receiver, ReceiverConfig, ReceiverEvent};
 use hamdrm_core::tx::{Transmitter, TxConfig};
 use hamdrm_data::receive::{FileEvent, FileReceiver};
 use hamdrm_data::send::{OutFile, SendConfig, frames};
+use hamdrm_voice::{SAMPLES_PER_FRAME, VoiceCodec};
 use std::path::PathBuf;
 
 #[derive(Parser)]
@@ -28,8 +30,25 @@ struct Cli {
 enum Cmd {
     /// Encode files into a HamDRM transmission WAV.
     Tx(TxArgs),
-    /// Decode a recording (48 kHz WAV) and save the received files.
+    /// Decode a recording (48 kHz WAV) and save the received files (and voice).
     Rx(RxArgs),
+    /// Encode a speech WAV (48 kHz mono) into a digital-voice transmission WAV.
+    Voice(VoiceArgs),
+    /// Neural voice weights: `models download` or `models path`.
+    Models { what: String },
+}
+
+#[derive(clap::Args)]
+struct VoiceArgs {
+    /// Speech (WAV, 48 kHz).
+    input: PathBuf,
+    #[arg(long, short)]
+    out: PathBuf,
+    /// Codec: neural (DecHAMDRM, Mimi) or lpc10 (EasyDRF compatible).
+    #[arg(long, default_value = "neural")]
+    codec: String,
+    #[command(flatten)]
+    modem: ModemArgs,
 }
 
 #[derive(clap::Args)]
@@ -45,13 +64,7 @@ struct RxArgs {
 }
 
 #[derive(clap::Args)]
-struct TxArgs {
-    /// Files to send.
-    #[arg(required = true)]
-    files: Vec<PathBuf>,
-    /// Output WAV.
-    #[arg(long, short)]
-    out: PathBuf,
+struct ModemArgs {
     /// Robustness mode: A, B or E.
     #[arg(long, default_value = "B")]
     mode: String,
@@ -67,27 +80,39 @@ struct TxArgs {
     /// Long (2 s) cell interleaver.
     #[arg(long)]
     long: bool,
-    /// EasyPal/QSSTV Reed–Solomon level 1..4 (0 = plain).
-    #[arg(long, default_value_t = 0)]
-    rs: u8,
     /// Callsign / label (max 9 characters).
     #[arg(long, default_value = "NOCALL")]
     call: String,
-    /// Lead-in body segments before the first file (EasyDRF sends 24 at startup, 14 later).
-    #[arg(long, default_value_t = 24)]
-    lead_in: usize,
     /// Audio frequency of carrier 0, Hz.
     #[arg(long, default_value_t = 350.0)]
     dc: f64,
     /// RMS output level (full scale 1.0).
     #[arg(long, default_value_t = 0.2)]
     level: f64,
+}
+
+#[derive(clap::Args)]
+struct TxArgs {
+    /// Files to send.
+    #[arg(required = true)]
+    files: Vec<PathBuf>,
+    /// Output WAV.
+    #[arg(long, short)]
+    out: PathBuf,
+    #[command(flatten)]
+    modem: ModemArgs,
+    /// EasyPal/QSSTV Reed–Solomon level 1..4 (0 = plain).
+    #[arg(long, default_value_t = 0)]
+    rs: u8,
+    /// Lead-in body segments before the first file (EasyDRF sends 24 at startup, 14 later).
+    #[arg(long, default_value_t = 24)]
+    lead_in: usize,
     /// Silence before and after, seconds.
     #[arg(long, default_value_t = 0.5)]
     pad: f64,
 }
 
-fn parse_config(a: &TxArgs) -> Result<MscConfig> {
+fn parse_config(a: &ModemArgs) -> Result<MscConfig> {
     let mode = match a.mode.to_ascii_uppercase().as_str() {
         "A" => Mode::A,
         "B" => Mode::B,
@@ -121,10 +146,10 @@ fn parse_config(a: &TxArgs) -> Result<MscConfig> {
 }
 
 fn tx(a: TxArgs) -> Result<()> {
-    let msc = parse_config(&a)?;
-    let mut cfg = TxConfig::new(msc, &a.call);
-    cfg.dc_freq = a.dc;
-    cfg.rms = a.level;
+    let msc = parse_config(&a.modem)?;
+    let mut cfg = TxConfig::new(msc, &a.modem.call);
+    cfg.dc_freq = a.modem.dc;
+    cfg.rms = a.modem.level;
     let mut tx = Transmitter::new(cfg);
     let mut files = Vec::new();
     for p in &a.files {
@@ -203,6 +228,10 @@ fn rx(a: RxArgs) -> Result<()> {
     std::fs::create_dir_all(&a.out_dir)?;
     let block = 4800 * usize::from(spec.channels);
     let mut saved = 0;
+    let mut service: Option<(Service, u8)> = None;
+    let mut vcodec: Option<Box<dyn VoiceCodec>> = None;
+    let mut voice_out: Vec<f32> = Vec::new();
+    let (mut vgood, mut vbad) = (0, 0);
     for chunk in samples.chunks(block) {
         for ev in rx.push(chunk) {
             match ev {
@@ -210,6 +239,7 @@ fn rx(a: RxArgs) -> Result<()> {
                 ReceiverEvent::ModeDetected(m) => eprintln!("mode {m}"),
                 ReceiverEvent::Configured(c) => eprintln!("MSC: {c}"),
                 ReceiverEvent::Fac { fac, label } => {
+                    service = Some((fac.service, fac.ext));
                     if a.verbose {
                         eprintln!(
                             "FAC frame {} {:?} label {:?}",
@@ -221,6 +251,38 @@ fn rx(a: RxArgs) -> Result<()> {
                 ReceiverEvent::Msc(f) => {
                     if a.verbose {
                         eprintln!("MSC {} bytes, FAC ok {}", f.bytes.len(), f.fac_ok);
+                    }
+                    if let Some((Service::Audio { coding, .. }, ext)) = service {
+                        if vcodec.is_none() {
+                            vcodec = match (coding, ext) {
+                                (AudioCoding::Lpc, _) => {
+                                    Some(Box::new(hamdrm_voice::easydrf::EasyDrfLpc::new()))
+                                }
+                                (AudioCoding::Celp, EXT_NEURAL_VOICE) => Some(neural()?),
+                                _ => None,
+                            };
+                            if let Some(c) = &vcodec {
+                                eprintln!("voice: {}", c.name());
+                            }
+                        }
+                        if let Some(c) = &mut vcodec {
+                            let bits: Vec<u8> = f
+                                .bytes
+                                .iter()
+                                .flat_map(|b| (0..8).rev().map(move |i| (b >> i) & 1))
+                                .collect();
+                            match c.decode(&bits) {
+                                Some(p) => {
+                                    vgood += 1;
+                                    voice_out.extend(p);
+                                }
+                                None => {
+                                    vbad += 1;
+                                    voice_out.extend(std::iter::repeat_n(0.0, SAMPLES_PER_FRAME));
+                                }
+                            }
+                        }
+                        continue;
                     }
                     for fe in files.push(Some(&f.bytes)) {
                         match fe {
@@ -261,6 +323,14 @@ fn rx(a: RxArgs) -> Result<()> {
             }
         }
     }
+    if !voice_out.is_empty() {
+        let path = a.out_dir.join("voice.wav");
+        write_wav(&path, &voice_out)?;
+        eprintln!(
+            "voice: {vgood} good frames, {vbad} bad → {}",
+            path.display()
+        );
+    }
     let st = rx.status();
     eprintln!(
         "done: {saved} file(s); FAC {}/{} ok, MSC {} ok, label {:?}, SNR {:?} dB, MER {:?} dB, WMER {:?} dB",
@@ -275,9 +345,108 @@ fn rx(a: RxArgs) -> Result<()> {
     Ok(())
 }
 
+fn write_wav(path: &std::path::Path, audio: &[f32]) -> Result<()> {
+    let spec = hound::WavSpec {
+        channels: 1,
+        sample_rate: SAMPLE_RATE,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut w = hound::WavWriter::create(path, spec)?;
+    for s in audio {
+        w.write_sample((s.clamp(-1.0, 1.0) * 32767.0) as i16)?;
+    }
+    w.finalize()?;
+    Ok(())
+}
+
+fn neural() -> Result<Box<dyn VoiceCodec>> {
+    let w = hamdrm_neural::find_weights()
+        .context("neural voice weights missing: run `dechamdrm models download`")?;
+    Ok(Box::new(
+        hamdrm_neural::MimiVoice::load(&w).map_err(anyhow::Error::msg)?,
+    ))
+}
+
+fn voice(a: VoiceArgs) -> Result<()> {
+    let msc = parse_config(&a.modem)?;
+    let mut cfg = TxConfig::new(msc, &a.modem.call);
+    cfg.dc_freq = a.modem.dc;
+    cfg.rms = a.modem.level;
+    let mut codec: Box<dyn VoiceCodec> = match a.codec.as_str() {
+        "lpc10" | "lpc" => {
+            cfg.service = Service::Audio {
+                coding: AudioCoding::Lpc,
+                text: false,
+            };
+            Box::new(hamdrm_voice::easydrf::EasyDrfLpc::new())
+        }
+        "neural" => {
+            cfg.service = Service::Audio {
+                coding: AudioCoding::Celp,
+                text: false,
+            };
+            cfg.ext = EXT_NEURAL_VOICE;
+            neural()?
+        }
+        c => bail!("unknown codec {c} (neural or lpc10)"),
+    };
+    let mut tx = Transmitter::new(cfg);
+    let speech = hamdrm_engine::read_wav(&a.input).map_err(anyhow::Error::msg)?;
+    let bits = tx.frame_bytes() * 8;
+    let mut audio = vec![0.0f32; 24_000];
+    // Two frames of silence first: receivers need them to lock.
+    let lead = vec![0.0f32; 2 * SAMPLES_PER_FRAME];
+    let all: Vec<f32> = lead.iter().chain(speech.iter()).copied().collect();
+    let mut n = 0;
+    for chunk in all.chunks(SAMPLES_PER_FRAME) {
+        let mut c = chunk.to_vec();
+        c.resize(SAMPLES_PER_FRAME, 0.0);
+        let b = codec.encode(&c, bits);
+        let bytes: Vec<u8> = b
+            .chunks(8)
+            .map(|c| c.iter().fold(0u8, |a, &v| (a << 1) | (v & 1)))
+            .collect();
+        tx.push_frame(&bytes[..bits / 8], &mut audio);
+        n += 1;
+    }
+    for _ in 0..msc.interleave.depth() + 1 {
+        let b = codec.encode(&vec![0.0; SAMPLES_PER_FRAME], bits);
+        let bytes: Vec<u8> = b
+            .chunks(8)
+            .map(|c| c.iter().fold(0u8, |a, &v| (a << 1) | (v & 1)))
+            .collect();
+        tx.push_frame(&bytes[..bits / 8], &mut audio);
+    }
+    audio.resize(audio.len() + 24_000, 0.0);
+    write_wav(&a.out, &audio)?;
+    eprintln!(
+        "{msc}: {n} voice frames ({}), {bits} bits/frame → {}",
+        codec.name(),
+        a.out.display()
+    );
+    Ok(())
+}
+
+fn models(what: &str) -> Result<()> {
+    match what {
+        "download" => {
+            let p = hamdrm_engine::download_neural_weights().map_err(anyhow::Error::msg)?;
+            println!("{}", p.display());
+        }
+        _ => match hamdrm_neural::find_weights() {
+            Some(p) => println!("{}", p.display()),
+            None => println!("not found; looked in {:?}", hamdrm_neural::weight_dirs()),
+        },
+    }
+    Ok(())
+}
+
 fn main() -> Result<()> {
     match Cli::parse().cmd {
         Cmd::Tx(a) => tx(a),
         Cmd::Rx(a) => rx(a),
+        Cmd::Voice(a) => voice(a),
+        Cmd::Models { what } => models(&what),
     }
 }

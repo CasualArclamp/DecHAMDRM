@@ -295,7 +295,8 @@ impl SymbolChain {
         for &c in map.msc_carriers(s) {
             self.vis_msc.push_back(cells[c as usize].sig);
         }
-        keep_last(&mut self.vis_fac, NUM_FAC_CELLS);
+        // Three frames of FAC cells: 45 per frame is too few for a constellation.
+        keep_last(&mut self.vis_fac, 3 * NUM_FAC_CELLS);
         keep_last(&mut self.vis_msc, map.msc_cells_per_frame);
         let mut row = if self.chan_rows.len() >= CHAN_ROWS {
             self.chan_rows.pop_front().unwrap_or_default()

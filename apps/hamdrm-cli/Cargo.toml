@@ -14,6 +14,9 @@ path = "src/main.rs"
 [dependencies]
 hamdrm-core.workspace = true
 hamdrm-data.workspace = true
+hamdrm-engine.workspace = true
+hamdrm-voice.workspace = true
+hamdrm-neural.workspace = true
 anyhow.workspace = true
 hound.workspace = true
 clap.workspace = true

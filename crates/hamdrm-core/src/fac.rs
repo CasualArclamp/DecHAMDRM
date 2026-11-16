@@ -14,7 +14,7 @@
 //! | 9     | data: 4-QAM flag; audio: text flag |
 //! | 10–30 | 3 label characters × 7 bits (characters 3f..3f+2 in frame f) |
 //! | 31    | audio: 4-QAM flag (EasyDRF 2022), otherwise 0 |
-//! | 32–39 | 0 |
+//! | 32–39 | DecHAMDRM extension byte (0 for legacy); EasyDRF and QSSTV never write these bits and ignore them (only the CRC covers them) |
 //! | 40–47 | CRC-8 over bits 0–39 |
 
 use crate::params::{Bandwidth, Interleave, Layout, Mode, MscConfig, Qam};
@@ -67,7 +67,13 @@ pub struct Fac {
     pub service: Service,
     /// The three label characters of this frame (7-bit; 0 = none).
     pub label: [u8; 3],
+    /// Extension byte in bits 32–39: 0 = plain HamDRM, [`EXT_NEURAL_VOICE`] = our
+    /// neural voice (sent with audio coding CELP, which EasyDRF does not decode).
+    pub ext: u8,
 }
+
+/// FAC extension byte of DecHAMDRM neural voice ("NV1").
+pub const EXT_NEURAL_VOICE: u8 = 0xA1;
 
 impl Fac {
     /// The MSC configuration this FAC describes (the robustness mode comes from the
@@ -128,7 +134,7 @@ impl Fac {
             w.write(u32::from(c & 127), 7);
         }
         w.write(u32::from(audio && qam4), 1);
-        w.write(0, 8);
+        w.write(u32::from(self.ext), 8);
         let mut bits = w.into_bits();
         debug_assert_eq!(bits.len(), FAC_BITS - 8);
         let crc = crc8(&bits);
@@ -169,6 +175,7 @@ impl Fac {
             *c = r.read(7) as u8;
         }
         let f31 = r.read_bool();
+        let ext = r.read(8) as u8;
         // EasyDRF FAC.cpp:756-762: the 4-QAM flag wins over the MSC-mode bit.
         let (service, qam4) = if is_data {
             (
@@ -201,6 +208,7 @@ impl Fac {
             protection,
             service,
             label,
+            ext,
         })
     }
 }
@@ -269,6 +277,7 @@ mod tests {
                         protection: 1,
                         service,
                         label: Fac::label_part("G4ABCDEFG", frame),
+                        ext: 0,
                     };
                     let mut bits = f.encode();
                     assert_eq!(bits.len(), FAC_BITS);
@@ -292,6 +301,7 @@ mod tests {
                 protection: 0,
                 service: Service::Data { packet_id: 0 },
                 label: Fac::label_part("M0XYZ", frame),
+                ext: 0,
             });
         }
         assert_eq!(a.label().as_deref(), Some("M0XYZ"));

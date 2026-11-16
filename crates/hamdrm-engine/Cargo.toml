@@ -10,7 +10,14 @@ rust-version.workspace = true
 [dependencies]
 hamdrm-core.workspace = true
 hamdrm-data.workspace = true
+hamdrm-voice.workspace = true
+hamdrm-neural = { workspace = true, optional = true }
 decdsss-audio.workspace = true
 decdsss-rig.workspace = true
 hound.workspace = true
 rustfft.workspace = true
+
+[features]
+default = ["neural"]
+# Neural voice (Mimi on candle): a large dependency.
+neural = ["dep:hamdrm-neural"]

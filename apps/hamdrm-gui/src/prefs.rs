@@ -1,6 +1,6 @@
 //! Settings kept between runs: `%APPDATA%\DecHAMDRM\prefs.txt` (key=value lines).
 
-use hamdrm_engine::{Bandwidth, Mode, PttConfig, Qam};
+use hamdrm_engine::{Bandwidth, Mode, PttConfig, Qam, VoiceKind};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -21,6 +21,10 @@ pub struct Prefs {
     pub ptt: PttConfig,
     pub auto_bsr: bool,
     pub out_dir: PathBuf,
+    pub mic: String,
+    pub speaker: String,
+    pub mic_gain: f32,
+    pub voice: VoiceKind,
 }
 
 impl Default for Prefs {
@@ -42,6 +46,10 @@ impl Default for Prefs {
             ptt: PttConfig::default(),
             auto_bsr: false,
             out_dir: default_out_dir(),
+            mic: String::new(),
+            speaker: String::new(),
+            mic_gain: 1.0,
+            voice: VoiceKind::Neural,
         }
     }
 }
@@ -102,6 +110,14 @@ impl Prefs {
         if let Some(v) = get("out_dir").filter(|v| !v.is_empty()) {
             p.out_dir = PathBuf::from(v);
         }
+        p.mic = get("mic").unwrap_or_default().into();
+        p.speaker = get("speaker").unwrap_or_default().into();
+        p.mic_gain = num("mic_gain").unwrap_or(1.0).clamp(0.1, 8.0) as f32;
+        p.voice = if get("voice") == Some("lpc10") {
+            VoiceKind::Lpc10
+        } else {
+            VoiceKind::Neural
+        };
         p.ptt = PttConfig::from_lookup(|k| map.get(k).map(String::as_str));
         p
     }
@@ -141,6 +157,18 @@ impl Prefs {
         kv("output", self.output.clone());
         kv("auto_bsr", u8::from(self.auto_bsr).to_string());
         kv("out_dir", self.out_dir.display().to_string());
+        kv("mic", self.mic.clone());
+        kv("speaker", self.speaker.clone());
+        kv("mic_gain", self.mic_gain.to_string());
+        kv(
+            "voice",
+            if self.voice == VoiceKind::Lpc10 {
+                "lpc10"
+            } else {
+                "neural"
+            }
+            .into(),
+        );
         for (k, v) in self.ptt.to_pairs() {
             kv(k, v);
         }

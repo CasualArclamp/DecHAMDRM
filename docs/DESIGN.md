@@ -52,6 +52,33 @@ ignore the MSC. Candidates, to be measured on the channel simulator:
 2. Application: a fountain code over MOT segments instead of RS + BSR, so any
    K(1+ε) received segments rebuild the file whatever was lost.
 
+## Digital voice (2026-11-16)
+
+Two codecs behind `hamdrm_voice::VoiceCodec` (400 ms of 48 kHz speech ↔ one MSC frame):
+
+- **LPC-10 (EasyDRF)** — `hamdrm-voice`: the HawkVoice LPC-10 C code as EasyDRF
+  modified it, vendored in `crates/hamdrm-voice/c` (LGPL-2+), with EasyDRF's framing
+  (app.md §7.1: 54-bit frames, 27-bit XOR check, frame length 180–540 samples).
+  FAC: audio, coding 0. Verified: EasyDRF's receiver passes the check on our frames
+  (18 blocks in mode B 2.5 kHz 16-QAM).
+- **Neural (Mimi)** — `hamdrm-neural`: Kyutai's Mimi (24 kHz, 12.5 frames/s, residual
+  codebooks of 11 bits = 550 bit/s each) on candle, CPU. Rory asked for a neural codec
+  (2026-11-16). Vendored from candle-transformers 0.9.2 with one change: the decoder
+  accepts fewer codebooks than the model has. Frame format "NV1" (`hamdrm_voice::nv`):
+  5 Mimi frames per MSC frame, codebooks in groups 1,1,2,4,4,4,8,8, each group with a
+  CRC-8, so damage to later groups only lowers the quality. Codebooks per mode: 8 in
+  B 2.3 kHz 4-QAM (4.4 kbit/s), 16 in B 2.5 kHz 16-QAM (8.8 kbit/s), 32 in A
+  2.5 kHz 64-QAM p1. FAC: audio, coding 1 ("CELP", which EasyDRF never decodes) plus
+  extension byte `0xA1` in FAC bits 32–39 (which EasyDRF/QSSTV never write).
+  Measured on the 9800X3D (release): encode 93 ms + decode 58 ms per 400 ms frame.
+  Weights: `kyutai/mimi` at a pinned commit (385 MB, CC-BY-4.0, SHA-256 checked),
+  not in the repo: `dechamdrm models download` or Settings → Download.
+
+CLI: `dechamdrm voice speech.wav --out tx.wav --codec neural|lpc10`; `dechamdrm rx`
+writes received voice to `voice.wav`. GUI: Talk button, microphone / speaker / gain in
+Settings. Not done: EasyDRF's Speex mode, the text message in voice frames, and voice
+quality has only been checked by a spectral-distance measure, not by listening.
+
 ## Interop testing
 
 `..\easydrf-build` is EasyDRF built from source with a local patch to `sound/Sound.cpp`:

@@ -21,6 +21,8 @@ pub struct TxConfig {
     pub service: Service,
     /// Station label (callsign), at most 9 characters.
     pub label: String,
+    /// FAC extension byte (bits 32–39); 0 for plain HamDRM.
+    pub ext: u8,
     /// Audio frequency of carrier k = 0, Hz.
     pub dc_freq: Real,
     /// RMS output level (full scale = 1.0).
@@ -33,6 +35,7 @@ impl TxConfig {
             msc,
             service: Service::Data { packet_id: 0 },
             label: label.to_string(),
+            ext: 0,
             dc_freq: crate::params::DEFAULT_DC_FREQ,
             rms: 0.2,
         }
@@ -77,6 +80,12 @@ impl Transmitter {
         }
     }
 
+    /// Change the service (data / audio) and extension byte from the next frame on.
+    pub fn set_service(&mut self, service: Service, ext: u8) {
+        self.cfg.service = service;
+        self.cfg.ext = ext;
+    }
+
     pub fn config(&self) -> &TxConfig {
         &self.cfg
     }
@@ -116,6 +125,7 @@ impl Transmitter {
             protection: self.cfg.msc.protection,
             service: self.cfg.service,
             label: Fac::label_part(&self.cfg.label, self.frame),
+            ext: self.cfg.ext,
         };
         let mut fac_cells = Vec::new();
         self.fac_enc.encode(&fac.encode(), &mut fac_cells);

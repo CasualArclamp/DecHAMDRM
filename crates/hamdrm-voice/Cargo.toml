@@ -1,0 +1,15 @@
+[package]
+name = "hamdrm-voice"
+description = "DecHAMDRM digital voice: EasyDRF's LPC-10 (HawkVoice C, vendored) framing and the neural-voice frame format"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0-or-later AND LGPL-2.0-or-later"
+repository.workspace = true
+rust-version.workspace = true
+links = "hvdi_lpc10"
+
+[dependencies]
+decdrm-core.workspace = true
+
+[build-dependencies]
+cc = "1"

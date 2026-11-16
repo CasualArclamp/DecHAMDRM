@@ -1,0 +1,24 @@
+[package]
+name = "hamdrm-neural"
+description = "Neural voice codec for DecHAMDRM: Kyutai's Mimi (vendored from candle-transformers), CPU"
+version.workspace = true
+edition.workspace = true
+license = "GPL-3.0-or-later AND (MIT OR Apache-2.0)"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# `candle` is the name the vendored Mimi code uses for candle-core.
+candle = { package = "candle-core", version = "0.9.1" }
+candle-nn = "0.9.1"
+tracing = "0.1"
+rayon = "1.12"
+hamdrm-voice.workspace = true
+
+[dev-dependencies]
+anyhow.workspace = true
+hound.workspace = true
+
+[features]
+# Kept so the vendored code's cfg compiles cleanly; never enabled (CPU only).
+flash-attn = []

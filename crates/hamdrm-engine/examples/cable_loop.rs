@@ -31,6 +31,9 @@ fn main() {
         out_dir,
         rx: ReceiverConfig::default(),
         auto_bsr: false,
+        mic: None,
+        speaker: Some(String::new()),
+        mic_gain: 1.0,
     });
     let tx = Engine::start(Options {
         input: Input::None,
@@ -39,6 +42,9 @@ fn main() {
         out_dir: std::env::temp_dir(),
         rx: ReceiverConfig::default(),
         auto_bsr: false,
+        mic: None,
+        speaker: Some(String::new()),
+        mic_gain: 1.0,
     });
     std::thread::sleep(Duration::from_millis(500));
     let mut s = TxSettings {

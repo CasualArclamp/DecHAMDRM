@@ -1,5 +1,7 @@
 //! Transmissions: audio generated a block at a time so long files need no big buffer.
 
+use decdsss_audio::InputStream;
+use hamdrm_core::fac::Service;
 use hamdrm_core::params::{Bandwidth, DEFAULT_DC_FREQ, Layout, Mode, MscConfig, SAMPLE_RATE};
 use hamdrm_core::tx::{Transmitter, TxConfig};
 use hamdrm_core::wftext;
@@ -7,6 +9,7 @@ use hamdrm_data::bsr::{BSR_NAME, BsrRequest, repair_copies};
 use hamdrm_data::mot::{MotEncoder, MotObject, segment_size};
 use hamdrm_data::packet::PacketEncoder;
 use hamdrm_data::send::{OutFile, SendConfig, frames, object_for};
+use hamdrm_voice::{SAMPLES_PER_FRAME, VoiceCodec};
 use std::f64::consts::PI;
 
 /// How to transmit.
@@ -49,6 +52,16 @@ enum Kind {
         phase: [f64; 3],
         freqs: [f64; 3],
         rms: f64,
+    },
+    /// Live voice: 400 ms of microphone audio per MSC frame.
+    Voice {
+        tx: Box<Transmitter>,
+        codec: Box<dyn VoiceCodec>,
+        mic: Box<InputStream>,
+        /// Interleaver flush frames still to send after the operator let go.
+        stopping: Option<usize>,
+        primed: bool,
+        gain: f32,
     },
 }
 
@@ -184,12 +197,50 @@ impl TxJob {
         )
     }
 
+    /// Live voice from `mic`, coded with `codec`; FAC service and extension byte as
+    /// the codec needs.
+    pub fn voice(
+        s: &TxSettings,
+        codec: Box<dyn VoiceCodec>,
+        mic: InputStream,
+        service: Service,
+        ext: u8,
+        gain: f32,
+    ) -> Self {
+        let mut tx = Self::transmitter(s);
+        tx.set_service(service, ext);
+        Self::new(
+            Kind::Voice {
+                tx: Box::new(tx),
+                codec,
+                mic: Box::new(mic),
+                stopping: None,
+                primed: false,
+                gain,
+            },
+            usize::MAX / 4,
+        )
+    }
+
+    pub fn is_voice(&self) -> bool {
+        matches!(self.kind, Kind::Voice { .. })
+    }
+
+    /// Let go of the voice key: the interleaver is flushed, then the job ends.
+    pub fn stop_voice(&mut self) {
+        if let Kind::Voice { stopping, tx, .. } = &mut self.kind
+            && stopping.is_none()
+        {
+            *stopping = Some(tx.config().msc.interleave.depth());
+        }
+    }
+
     pub fn is_tune(&self) -> bool {
         matches!(self.kind, Kind::Tune { .. })
     }
 
     pub fn total_s(&self) -> f64 {
-        if self.is_tune() {
+        if self.is_tune() || self.is_voice() {
             0.0
         } else {
             self.total as f64 / f64::from(SAMPLE_RATE)
@@ -214,6 +265,7 @@ impl TxJob {
             } => *next >= frames.len() + flush,
             Kind::Audio(a) => a.is_empty(),
             Kind::Tune { .. } => false,
+            Kind::Voice { stopping, .. } => *stopping == Some(0),
         }
     }
 
@@ -238,6 +290,44 @@ impl TxJob {
             Kind::Audio(a) => {
                 self.buf = std::mem::take(a);
             }
+            Kind::Voice {
+                tx,
+                codec,
+                mic,
+                stopping,
+                primed,
+                gain,
+            } => {
+                let bits = tx.frame_bytes() * 8;
+                let pcm = if !*primed {
+                    // One frame of silence first, so the sound card always has a frame
+                    // queued while the next 400 ms of speech is captured.
+                    *primed = true;
+                    Some(vec![0.0f32; SAMPLES_PER_FRAME])
+                } else if let Some(left) = stopping {
+                    if *left > 0 {
+                        *left -= 1;
+                        Some(vec![0.0f32; SAMPLES_PER_FRAME])
+                    } else {
+                        None
+                    }
+                } else if mic.available_frames() >= SAMPLES_PER_FRAME {
+                    let mut x = mic.read(SAMPLES_PER_FRAME);
+                    x.iter_mut()
+                        .for_each(|v| *v = (*v * *gain).clamp(-1.0, 1.0));
+                    Some(x)
+                } else {
+                    None
+                };
+                if let Some(pcm) = pcm {
+                    let b = codec.encode(&pcm, bits);
+                    let bytes: Vec<u8> = b
+                        .chunks(8)
+                        .map(|c| c.iter().fold(0u8, |a, &v| (a << 1) | (v & 1)))
+                        .collect();
+                    tx.push_frame(&bytes[..bits / 8], &mut self.buf);
+                }
+            }
             Kind::Tune { phase, freqs, rms } => {
                 let g = *rms * (2.0f64 / 3.0).sqrt();
                 for _ in 0..4800 {
@@ -250,7 +340,7 @@ impl TxJob {
                 }
             }
         }
-        if self.buf.is_empty() && self.tail > 0 {
+        if self.buf.is_empty() && self.tail > 0 && self.source_done() {
             self.buf = vec![0.0; self.tail];
             self.tail = 0;
         }

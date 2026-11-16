@@ -12,3 +12,5 @@
 .vscode/
 .idea/
 Thumbs.db
+# Neural codec weights (downloaded on request)
+/models/
