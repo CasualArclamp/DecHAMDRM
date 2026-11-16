@@ -21,6 +21,10 @@ hound = "3.5.1"
 clap = { version = "4.6", features = ["derive"] }
 hamdrm-core = { path = "crates/hamdrm-core" }
 hamdrm-data = { path = "crates/hamdrm-data" }
+hamdrm-engine = { path = "crates/hamdrm-engine" }
+# Sound cards and transmitter keying (IC-7300 CI-V, FT-710, rigctld, DTR/RTS) from DecDSSS.
+decdsss-audio = { git = "https://github.com/CasualArclamp/DecDSSS", tag = "v0.0.9" }
+decdsss-rig = { git = "https://github.com/CasualArclamp/DecDSSS", tag = "v0.0.9" }
 
 # DSP is unusably slow unoptimised (same tradeoff as DecDRM).
 [profile.dev]

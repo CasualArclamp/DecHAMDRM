@@ -1,0 +1,16 @@
+[package]
+name = "hamdrm-engine"
+description = "DecHAMDRM worker: sound card / WAV input, receiver, file saving, transmit queue, PTT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+hamdrm-core.workspace = true
+hamdrm-data.workspace = true
+decdsss-audio.workspace = true
+decdsss-rig.workspace = true
+hound.workspace = true
+rustfft.workspace = true

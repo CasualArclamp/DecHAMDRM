@@ -210,12 +210,14 @@ fn rx(a: RxArgs) -> Result<()> {
     }
     let st = rx.status();
     eprintln!(
-        "done: {saved} file(s); FAC {}/{} ok, MSC {} ok, label {:?}, SNR {:?} dB",
+        "done: {saved} file(s); FAC {}/{} ok, MSC {} ok, label {:?}, SNR {:?} dB, MER {:?} dB, WMER {:?} dB",
         st.fac_ok,
         st.fac_ok + st.fac_bad,
         st.msc_ok,
         st.label,
-        st.snr_db.map(|v| (v * 10.0).round() / 10.0)
+        st.snr_db.map(|v| (v * 10.0).round() / 10.0),
+        st.mer_db.map(|v| (v * 10.0).round() / 10.0),
+        st.wmer_db.map(|v| (v * 10.0).round() / 10.0)
     );
     Ok(())
 }
