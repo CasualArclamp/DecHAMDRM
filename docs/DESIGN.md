@@ -33,10 +33,37 @@ Format specs written from those sources: `docs/spec/phy.md`, `docs/spec/app.md`.
 - `crates/hamdrm-engine` — worker thread, sound card, PTT, snapshots for the UI.
 - `apps/hamdrm-cli` (`dechamdrm`), `apps/hamdrm-gui`.
 
+## Format choices (from the specs)
+
+- **Two incompatible RS file schemes exist** (app.md §3). We send the EasyPal/QSSTV one
+  (`name.rsN`, field 0x11D) because EasyPal is the main audience, and receive both
+  (EasyDRF's: field 0x187, `EasyDRFHeader/|`, level in the data-group Rfa bits).
+- Packet lengths ≥ 257 (mode A 64-QAM) hit the 8-bit PPI count wrap that every
+  HamDRM receiver has; we keep the on-air behaviour (same as EasyPal).
+- TX defaults: mode B, 2.5 kHz, 16-QAM, protection 0, short interleaver, carrier 0 at
+  350 Hz (EasyDRF's receiver only searches 350 ± 5 Hz), lead-in 9 segments.
+
+## Better-FEC modes (plan, milestone 9)
+
+Signalled in FAC bits 32–39, which EasyDRF and QSSTV never write but cover with the
+CRC (phy.md §4.1): legacy receivers still decode the FAC, fail the packet CRCs and
+ignore the MSC. Candidates, to be measured on the channel simulator:
+1. PHY: LDPC + BICM in the MSC instead of the K=7 convolutional MLC (≈2–3 dB).
+2. Application: a fountain code over MOT segments instead of RS + BSR, so any
+   K(1+ε) received segments rebuild the file whatever was lost.
+
+## Interop testing
+
+`..\easydrf-build` is EasyDRF built from source with a local patch to `sound/Sound.cpp`:
+`EASYDRF_WAV=file.wav EASYDRF_SPEED=2 EasyDRF.exe` (run in `..\easydrf-build\run`) feeds
+a 48 kHz mono WAV in place of the sound card and exits after 30 s of silence; received
+files land in `run\Rx Files`. Above about 2× real time it stalls. Script:
+`out/interop.sh NAME tx-args…` (git-ignored).
+
 ## Milestones
 
-1. [ ] Specs from the references (phy, app).
-2. [ ] Core TX: file → MOT → MSC → OFDM WAV that EasyDRF/QSSTV decode.
+1. [x] Specs from the references (phy, app).
+2. [x] Core TX: file → MOT → MSC → OFDM WAV, byte-exact through EasyDRF's receiver.
 3. [ ] Core RX: our TX loopback through the channel simulator (AWGN, HF fading).
 4. [ ] RS erasure coding + BSR, picture gallery.
 5. [ ] CLI rx/tx on WAV and sound card.
