@@ -112,7 +112,7 @@ interleave and instances/RS level come from `settings.txt`, `EASYDRF_PROT` sets 
 protection level), `EASYDRF_TXBSR=file` sends a BSR request, and without either it
 sends voice from `EASYDRF_MIC=speech.wav` (`EASYDRF_CODEC=speex` for Speex). No sound
 device is opened and PTT is disabled in harness runs. Script:
-`scripts/interop/edtx.sh` (run in `..\easydrf-builduntx`), all 30 combinations:
+`scripts/interop/edtx.sh` (run in `..\easydrf-build\runtx`), all 30 combinations:
 `scripts/interop/edmatrix.sh`, noise burst into a recording: `scripts/interop/gap.py`.
 All our changes to EasyDRF are in `docs/interop/easydrf-harness.patch`.
 
