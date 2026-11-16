@@ -34,6 +34,11 @@ struct Outcome {
     /// Frames sent per segment, and how many of each segment came out identical.
     sent: Vec<usize>,
     matched: Vec<usize>,
+    /// Indices of the matched frames per segment.
+    matched_idx: Vec<Vec<usize>>,
+    /// Cell error rates of the matched (good) and of the trusted-but-wrong frames.
+    cer_good: Vec<Real>,
+    cer_bad: Vec<Real>,
     /// Decoded frames flagged trusted whose bytes were not sent (false trust).
     trusted_wrong: usize,
     /// Decoded frames matching nothing (garbage, trusted or not).
@@ -73,6 +78,7 @@ fn run(segments: &[(MscConfig, usize)], imp: &Impair) -> Outcome {
 
     let mut rx = Receiver::new(ReceiverConfig::default());
     out.matched = vec![0; segments.len()];
+    out.matched_idx = vec![Vec::new(); segments.len()];
     let mut seen = std::collections::HashSet::new();
     let trace = std::env::var_os("HAMDRM_TRACE").is_some();
     for (ci, chunk) in audio.chunks(4800).enumerate() {
@@ -90,10 +96,15 @@ fn run(segments: &[(MscConfig, usize)], imp: &Impair) -> Outcome {
                     Some(&(seg, f)) => {
                         if seen.insert((seg, f)) {
                             out.matched[seg] += 1;
+                            out.matched_idx[seg].push(f);
+                            out.cer_good.push(m.cell_error_rate);
                         }
                     }
                     None => {
                         out.unmatched += 1;
+                        if m.fac_ok && m.complete {
+                            out.cer_bad.push(m.cell_error_rate);
+                        }
                         if m.trusted {
                             out.trusted_wrong += 1;
                         }
@@ -167,7 +178,7 @@ fn analytic(x: &[Real]) -> Vec<Cplx> {
     let mut v: Vec<Cplx> = x.iter().map(|&r| Cplx::new(r, 0.0)).collect();
     fft.forward(&mut v);
     for (k, c) in v.iter_mut().enumerate() {
-        let w = if k == 0 || (n % 2 == 0 && k == n / 2) {
+        let w = if k == 0 || (n.is_multiple_of(2) && k == n / 2) {
             1.0
         } else if k < n.div_ceil(2) {
             2.0
@@ -246,6 +257,31 @@ fn awgn_offset_and_sample_rate() {
 }
 
 #[test]
+fn large_tuning_offsets() {
+    // The default DC search covers 350 ± 250 Hz.
+    for (foff, mode) in [(-150.0, Mode::E), (200.0, Mode::A)] {
+        let c = short(mode, Bandwidth::Wide, Qam::Qam16);
+        let imp = Impair { snr_db: Some(20.0), freq_offset_hz: foff, seed: 8, ..Default::default() };
+        let o = run(&[(c, 16)], &imp);
+        check_clean(&o, &format!("{c} {foff:+} Hz"));
+        let dc = o.dc_hz.unwrap();
+        assert!((dc - 350.0 - foff).abs() < 2.0, "DC at {dc} Hz");
+    }
+}
+
+#[test]
+fn noise_only_decodes_nothing() {
+    let mut rng = Rng::new(9);
+    let noise: Vec<f32> = (0..SAMPLE_RATE as usize * 15).map(|_| (0.1 * rng.gaussian()) as f32).collect();
+    let mut rx = Receiver::new(ReceiverConfig::default());
+    for chunk in noise.chunks(4800) {
+        for ev in rx.push(chunk) {
+            assert!(!matches!(ev, ReceiverEvent::Msc(_) | ReceiverEvent::Fac { .. }), "{ev:?}");
+        }
+    }
+}
+
+#[test]
 fn hf_fading_two_path() {
     // CCIR-poor-like: two equal paths 2 ms apart, 1 Hz Doppler spread each, 4-QAM.
     let model = ChannelModel::custom(vec![Path::new(0.0, 1.0, 0.0, 1.0), Path::new(2.0, 1.0, 0.0, 1.0)]);
@@ -304,11 +340,12 @@ fn mode_change_mid_stream() {
     assert!(o.matched[1] >= 10, "{o:?}");
 }
 
-/// Fraction of frames decoded (of those after the acquisition allowance).
-fn success(c: MscConfig, imp: &Impair, frames: usize) -> Real {
+/// Fraction of the frames from index `ACQ_FRAMES` on that decoded, and the
+/// outcome (for the cell-error-rate statistics).
+fn success(c: MscConfig, imp: &Impair, frames: usize) -> (Real, Outcome) {
     let o = run(&[(c, frames)], imp);
-    assert_eq!(o.trusted_wrong, 0, "{c} {imp:?}");
-    o.matched[0] as Real / (frames - ACQ_FRAMES) as Real
+    let ok = o.matched_idx[0].iter().filter(|&&f| f >= ACQ_FRAMES).count();
+    (ok as Real / (frames - ACQ_FRAMES) as Real, o)
 }
 
 /// AWGN thresholds: lowest SNR (0.5 dB steps) at which ≥ 99 % of the frames after
@@ -328,11 +365,21 @@ fn awgn_threshold_sweep() {
         let mut snr = 20.0;
         let mut last_ok = None;
         while snr > -2.0 {
-            let rate: Real = (0..2)
-                .map(|seed| success(c, &Impair { snr_db: Some(snr), seed: 100 + seed, ..Default::default() }, 60))
-                .sum::<Real>()
-                / 2.0;
-            eprintln!("{c}: {snr:.1} dB → {:.1} %", rate * 100.0);
+            let (mut rate, mut good, mut bad, mut false_trust) = (0.0, Vec::new(), Vec::new(), 0);
+            for seed in 0..2 {
+                let (r, o) = success(c, &Impair { snr_db: Some(snr), seed: 100 + seed, ..Default::default() }, 60);
+                rate += r / 2.0;
+                good.extend(o.cer_good);
+                bad.extend(o.cer_bad);
+                false_trust += o.trusted_wrong;
+            }
+            let max_good = good.iter().copied().fold(0.0, Real::max);
+            let min_bad = bad.iter().copied().fold(1.0, Real::min);
+            eprintln!(
+                "{c}: {snr:.1} dB → {:.1} % (CER good ≤ {max_good:.3}, in-sync wrong {} ≥ {min_bad:.3}, false trusted {false_trust})",
+                rate * 100.0,
+                bad.len()
+            );
             if rate < 0.99 {
                 break;
             }

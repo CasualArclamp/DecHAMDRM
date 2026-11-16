@@ -30,14 +30,14 @@ const STEP: usize = 2;
 const BAND_CENTRE_HZ: Real = 1250.0;
 /// Robustness-mode detection observes this many symbols.
 const RM_BLOCKS: usize = 16;
-/// Required ratio between best and second-best mode score (Dream: 8). Measured on
-/// the loopback: the true mode always scores highest down to 5 dB SNR, clean mode A
-/// with 4.5 kHz occupancy reaches only ~7, and noise alone rarely passes 6.
+/// Required ratio between best and second-best mode score (Dream: 8; DecDRM's
+/// value, measured there on DRM30). HamDRM loopback (`tests/loopback.rs`, AWGN in
+/// 2.5 kHz): A, B and E are detected correctly down to 0 dB, and 15 s of noise alone
+/// never yields a FAC.
 const RM_RELIABILITY: Real = 6.0;
-/// A longer observation for weak or narrow signals, with a lower threshold. Mode A
-/// has only a 1/10 guard duty cycle, so with 4.5/5 kHz occupancy its 16-symbol score
-/// is barely above the estimation noise of the other modes (ratio ~4–7 on a clean
-/// signal); 48 symbols reduce that noise by √3.
+/// A longer observation for weak signals, with a lower threshold (DecDRM: mode A's
+/// 1/10 guard duty cycle makes its 16-symbol score noisy); 48 symbols reduce the
+/// estimation noise by √3.
 const RM_BLOCKS_LONG: usize = 48;
 const RM_RELIABILITY_LONG: Real = 5.0;
 /// Low-pass for the acquired timing (per candidate).

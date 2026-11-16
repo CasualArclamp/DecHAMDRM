@@ -6,8 +6,12 @@ then the format specs `docs/spec/phy.md` and `docs/spec/app.md`.
 
 ## Layout
 - `crates/hamdrm-core` — params (modes A/B/E, 2.3/2.5 kHz), tables, cell map, FAC,
-  MLC; TX/RX chains to come. Ported from DecDRM's `decdrm-core` (git dependency, tag
-  pinned in the workspace `Cargo.toml`) and uses its generic FEC/DSP modules.
+  MLC, `tx` (Transmitter) and `rx` (push-driven Receiver: DC search near 350 Hz, mode
+  detection, sync, channel estimation, FAC-configured MSC; port of DecDRM's `rx`).
+  Loopback tests: `tests/loopback.rs`; SNR sweeps with
+  `cargo test --release -p hamdrm-core --test loopback -- --ignored --nocapture`.
+  Ported from DecDRM's `decdrm-core` (git dependency, tag pinned in the workspace
+  `Cargo.toml`) and uses its generic FEC/DSP modules.
 
 ## References (outside the repo, never committed)
 - `..\easydrf-ref` — EasyDRF (DazDSP/EasyDRF, GPL-3): the on-air authority.

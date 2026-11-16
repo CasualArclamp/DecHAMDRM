@@ -177,8 +177,13 @@ pub struct MscFrame {
     /// parameters. It says nothing about residual bit errors at low SNR — data
     /// packets carry their own CRC-16 for that.
     pub trusted: bool,
-    /// Normalised final Viterbi path metric per MLC level (lower is better).
+    /// Normalised final Viterbi path metric per MLC level (lower is better; scales
+    /// with the input level).
     pub path_metrics: Vec<Real>,
+    /// Cell error rate before FEC, judged against the re-encoded decoded bits: a
+    /// level-independent quality figure (a few % near the threshold, ~50 % or more
+    /// for a garbled frame).
+    pub cell_error_rate: Real,
 }
 
 /// Something the receiver produced.
@@ -689,8 +694,9 @@ impl Receiver {
         let Some(d) = dec.decode(cells, gap) else { return };
         let config = dec.config();
         let nbits = d.bits.len();
-        // Pack MSB first, dropping the trailing bits mod 8.
-        let bytes: Vec<u8> = d.bits.chunks_exact(8).map(|b| b.iter().fold(0u8, |acc, &x| (acc << 1) | (x & 1))).collect();
+        // Pack MSB first, dropping the trailing bits mod 8. `as_chunks::<8>()` splits
+        // the slice into fixed `[u8; 8]` arrays (`.0`) and a remainder (`.1`, dropped).
+        let bytes: Vec<u8> = d.bits.as_chunks::<8>().0.iter().map(|b| b.iter().fold(0u8, |acc, &x| (acc << 1) | (x & 1))).collect();
         let fac_ok = fac_cfg == Some(config);
         let trusted = fac_ok && d.complete;
         if trusted {
@@ -706,6 +712,7 @@ impl Receiver {
             complete: d.complete,
             trusted,
             path_metrics: d.path_metrics,
+            cell_error_rate: d.cell_error_rate,
         }));
     }
 
