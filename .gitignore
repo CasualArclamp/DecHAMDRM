@@ -14,3 +14,5 @@
 Thumbs.db
 # Neural codec weights (downloaded on request)
 /models/
+# Notes for Claude Code sessions: local only
+CLAUDE.md
