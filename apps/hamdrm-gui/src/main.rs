@@ -1394,6 +1394,7 @@ fn main() -> eframe::Result {
     let mut start_channel = false;
     let mut jp2_arg: Option<PathBuf> = None;
     let mut jp2_quality: Option<u32> = None;
+    let (mut tx_qam, mut tx_prot): (Option<String>, Option<u8>) = (None, None);
     let (mut file, mut speed, mut out_dir, mut shot_path, mut after) =
         (None, 1.0, None, None, 10.0);
     while let Some(a) = args.next() {
@@ -1405,6 +1406,9 @@ fn main() -> eframe::Result {
             "--jp2" => jp2_arg = args.next().map(PathBuf::from),
             "--jp2-quality" => jp2_quality = args.next().and_then(|v| v.parse().ok()),
             "--after" => after = args.next().and_then(|v| v.parse().ok()).unwrap_or(10.0),
+            // Transmit settings for a screenshot (unattended runs use default settings).
+            "--qam" => tx_qam = args.next(),
+            "--prot" => tx_prot = args.next().and_then(|v| v.parse().ok()),
             _ => file = Some(PathBuf::from(a)),
         }
     }
@@ -1416,6 +1420,15 @@ fn main() -> eframe::Result {
     };
     if let Some(d) = &out_dir {
         prefs.out_dir = d.clone();
+    }
+    match tx_qam.as_deref() {
+        Some("4") => prefs.qam = Qam::Qam4,
+        Some("16") => prefs.qam = Qam::Qam16,
+        Some("64") => prefs.qam = Qam::Qam64,
+        _ => {}
+    }
+    if let Some(p) = tx_prot {
+        prefs.protection = p.min(1);
     }
     let input = match &file {
         Some(p) => Input::File {
