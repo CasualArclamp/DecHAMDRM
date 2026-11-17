@@ -364,6 +364,27 @@ impl RxObject {
     pub fn body(&self) -> Vec<u8> {
         self.body_with_erasures().0
     }
+
+    /// Number of body segments received without a gap from the start.
+    pub fn leading_segments(&self) -> usize {
+        self.segments.iter().take_while(|s| s.is_some()).count()
+    }
+
+    /// The start of the body up to the first missing segment (for showing a picture
+    /// while it arrives).
+    pub fn leading_bytes(&self) -> Vec<u8> {
+        let mut out: Vec<u8> = self
+            .segments
+            .iter()
+            .map_while(|s| s.as_deref())
+            .flatten()
+            .copied()
+            .collect();
+        if let Some(h) = &self.header {
+            out.truncate(h.body_size);
+        }
+        out
+    }
 }
 
 /// Collects data groups into objects; keeps the last few transport ids so that

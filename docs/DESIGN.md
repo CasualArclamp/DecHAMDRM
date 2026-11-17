@@ -200,6 +200,31 @@ Test `dropouts_keep_frequency_and_clock_centred`; trace tool
 `cargo run --release -p hamdrm-core --example rxtrace -- FILE.wav`; live:
 `--example voice_loop -- SPEECH.wav neural a64long`.
 
+## Progressive picture display (2026-11-17)
+
+The engine publishes, per object in reception, the file from its start to the first
+missing segment (`ObjectView::partial`); the window decodes it on a worker thread
+(`apps/hamdrm-gui/src/progressive.rs`) and shows it in the Picture tab until the
+finished file takes over.
+
+- JPEG 2000: OpenJPEG decodes a cut-off file in non-strict mode. The transcoder now
+  writes eight quality layers (each about 1.8 times the bytes of the one before, 0.1 %
+  larger file), so the whole frame is there after a few segments and sharpens. A
+  single-layer file from another program arrives resolution by resolution, and
+  OpenJPEG then returns a small picture in a black frame or mixed components; the
+  decoder therefore tries every resolution from the coarsest up and keeps the finest
+  one that agrees with the one below it (mean difference 2 to 10 for good levels, 27
+  and up for broken ones; limit 18), scaled to the full frame.
+- JPEG: the rows received so far, grey below.
+- Not possible for Reed-Solomon coded files (`.rsN`, EasyDRF RS): the blocks are
+  interleaved byte-wise over the whole body, so before the code decodes there is no
+  leading part of the file, and the code decodes the moment enough has arrived. Also
+  not for `.lz` packed files. A gap (lost segment) stops the preview growing until a
+  repeat or BSR fills it.
+
+Checked: unit tests on cut-off files, and the window on a 60 s WAV (8-layer and
+1-layer JPEG 2000) with screenshots at 15, 30 and 40 s.
+
 ## Open items
 
 - A recording of a real EasyPal (or QSSTV) transmission for RX interop.

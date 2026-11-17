@@ -20,6 +20,9 @@ with **EasyPal**, **EasyDRF** and **QSSTV**.
 - Reed-Solomon file protection: EasyPal / QSSTV `.rs1`–`.rs4` (send and receive) and
   EasyDRF's own RS levels (receive).
 - BSR: ask for the missing segments of a file, and answer other stations' requests.
+- Progressive display: a JPEG 2000 or JPEG picture sent without Reed-Solomon shows
+  while it arrives and sharpens as more comes in (the transcoder writes its files in
+  quality layers for this).
 - Picture → JPEG 2000 transcoder with a quality slider and a live preview of what the
   other station will see, with the file size and air time.
 

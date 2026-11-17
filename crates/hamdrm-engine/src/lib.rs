@@ -20,9 +20,11 @@ use decdsss_rig::Ptt;
 pub use hamdrm_core::Cplx;
 use hamdrm_core::fac::{AudioCoding, EXT_NEURAL_VOICE, Service, ext_has};
 use hamdrm_core::rx::{Receiver, ReceiverEvent};
+use hamdrm_data::bsr::BSR_NAME;
 use hamdrm_data::receive::{FileEvent, FileReceiver};
+use hamdrm_data::rsfile;
 use hamdrm_voice::VoiceCodec;
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver as ChanRx, Sender, channel};
 use std::sync::{Arc, Mutex};
@@ -124,6 +126,10 @@ pub struct ObjectView {
     pub segments: Vec<bool>,
     pub done: bool,
     pub updated: Instant,
+    /// The file from its start up to the first missing segment, for showing a
+    /// picture while it arrives. `None` for Reed-Solomon coded or packed files:
+    /// their bytes are interleaved and mean nothing until the code is decoded.
+    pub partial: Option<Arc<Vec<u8>>>,
 }
 
 /// A received file.
@@ -264,6 +270,9 @@ struct Worker {
     ptt: Arc<Ptt>,
     rx: Receiver,
     files: FileReceiver,
+    /// Leading bytes of the objects in reception, by transport id, with the number
+    /// of segments they were built from.
+    partials: HashMap<u16, (usize, Arc<Vec<u8>>)>,
     wf: Waterfall,
     job: Option<TxJob>,
     keyed: bool,
@@ -292,6 +301,7 @@ impl Worker {
         let mut w = Self {
             rx: Receiver::new(opts.rx.clone()),
             files: FileReceiver::new(),
+            partials: HashMap::new(),
             wf: Waterfall::new(),
             source: Source::None,
             output: None,
@@ -910,25 +920,42 @@ impl Worker {
 
     fn publish(&mut self) {
         let vis = self.rx.visuals();
-        let objects: Vec<ObjectView> = self
-            .files
-            .objects()
-            .iter()
-            .map(|o| {
-                let n = o.total.unwrap_or(o.segments.len());
-                ObjectView {
-                    tid: o.tid,
-                    name: o.name(),
-                    received: o.received(),
-                    total: o.total,
-                    segments: (0..n)
-                        .map(|i| o.segments.get(i).is_some_and(|s| s.is_some()))
-                        .collect(),
-                    done: o.delivered,
-                    updated: Instant::now(),
+        let mut objects = Vec::new();
+        for o in self.files.objects() {
+            let n = o.total.unwrap_or(o.segments.len());
+            let name = o.name();
+            let lead = o.leading_segments();
+            let plain = o.rs_level == 0
+                && name.as_deref().is_some_and(|n| {
+                    let l = n.to_ascii_lowercase();
+                    rsfile::level_of(&l).is_none() && !l.ends_with(".lz") && l != BSR_NAME
+                });
+            let partial = if plain && !o.delivered && lead > 0 {
+                match self.partials.get(&o.tid) {
+                    Some((have, data)) if *have == lead => Some(data.clone()),
+                    _ => {
+                        let data = Arc::new(o.leading_bytes());
+                        self.partials.insert(o.tid, (lead, data.clone()));
+                        Some(data)
+                    }
                 }
-            })
-            .collect();
+            } else {
+                self.partials.remove(&o.tid);
+                None
+            };
+            objects.push(ObjectView {
+                tid: o.tid,
+                name,
+                received: o.received(),
+                total: o.total,
+                segments: (0..n)
+                    .map(|i| o.segments.get(i).is_some_and(|s| s.is_some()))
+                    .collect(),
+                done: o.delivered,
+                updated: Instant::now(),
+                partial,
+            });
+        }
         let mut v = self.view.lock().unwrap_or_else(|e| e.into_inner());
         v.status = self.rx.status().clone();
         v.chain = vis.chain;

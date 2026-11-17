@@ -11,6 +11,7 @@
 mod chantab;
 mod plots;
 mod prefs;
+mod progressive;
 mod rxcard;
 mod theme;
 mod transcode;
@@ -75,6 +76,9 @@ struct App {
     images: HashMap<PathBuf, Option<(TextureHandle, [usize; 2])>>,
     viewing: Option<PathBuf>,
     files_seen: usize,
+    previewer: progressive::Previewer,
+    /// The picture being received, as far as it can be shown.
+    preview: Option<Preview>,
     id_text: String,
     tuning: bool,
     show_settings: bool,
@@ -85,6 +89,14 @@ struct App {
     ports: Vec<String>,
     started: Instant,
     shot: Option<Shot>,
+}
+
+/// A picture shown while it is still arriving.
+struct Preview {
+    tid: u16,
+    bytes: usize,
+    tex: TextureHandle,
+    size: [usize; 2],
 }
 
 const WF_COLS: usize = 1200;
@@ -430,7 +442,64 @@ impl App {
         }
     }
 
+    /// Decode the picture that is arriving (on the worker thread) whenever more of
+    /// it is there, and keep the newest result as a texture.
+    fn update_preview(&mut self, ctx: &egui::Context) {
+        // The object that is growing: more leading bytes than the picture shown.
+        let shown = self.preview.as_ref().map(|p| (p.tid, p.bytes));
+        let next = self
+            .view
+            .objects
+            .iter()
+            .filter(|o| !o.done)
+            .filter_map(|o| Some((o.tid, o.partial.as_ref()?)))
+            .filter(|(tid, d)| shown.is_none_or(|(t, b)| t != *tid || d.len() > b))
+            .max_by_key(|(_, d)| d.len());
+        if let Some((tid, data)) = next {
+            self.previewer.request(tid, data);
+        }
+        if let Some(p) = self.previewer.poll()
+            && self.view.objects.iter().any(|o| o.tid == p.tid && !o.done)
+        {
+            let img = ColorImage::from_rgba_unmultiplied(p.size, &p.rgba);
+            self.preview = Some(Preview {
+                tid: p.tid,
+                bytes: p.bytes,
+                tex: ctx.load_texture("receiving", img, TextureOptions::LINEAR),
+                size: p.size,
+            });
+        }
+    }
+
+    /// The picture in reception, with how much of it is there.
+    fn preview_view(&self, ui: &mut Ui) -> bool {
+        let Some(p) = &self.preview else { return false };
+        let obj = self.view.objects.iter().find(|o| o.tid == p.tid);
+        ui.horizontal(|ui| {
+            let name = obj
+                .and_then(|o| o.name.clone())
+                .unwrap_or_else(|| format!("transport {}", p.tid));
+            ui.label(RichText::new(name).strong().color(WHITE));
+            ui.label(RichText::new("receiving").color(AMBER));
+            if let Some(o) = obj {
+                let total = o.total.map_or("?".into(), |t| t.to_string());
+                ui.label(RichText::new(format!("{} of {total} segments", o.received)).color(DIM));
+            }
+            ui.label(RichText::new(format!("showing the first {} bytes", p.bytes)).color(DIM));
+        });
+        let avail = ui.available_size();
+        let s = (avail.x / p.size[0] as f32)
+            .min(avail.y / p.size[1] as f32)
+            .min(4.0);
+        let sz = vec2(p.size[0] as f32 * s, p.size[1] as f32 * s);
+        ui.centered_and_justified(|ui| ui.add(egui::Image::new((p.tex.id(), sz))));
+        true
+    }
+
     fn viewer(&mut self, ui: &mut Ui, ctx: &egui::Context) {
+        if self.preview_view(ui) {
+            return;
+        }
         let Some(path) = self.viewing.clone() else {
             ui.centered_and_justified(|ui| {
                 ui.label(RichText::new("Received pictures appear here").color(FAINT))
@@ -738,6 +807,7 @@ impl App {
                         .interact(Sense::click());
                     if resp.clicked() {
                         self.viewing = Some(f.path.clone());
+                        self.preview = None;
                     }
                 }
             });
@@ -1165,7 +1235,9 @@ impl eframe::App for App {
         if self.view.files.len() > self.files_seen {
             self.files_seen = self.view.files.len();
             self.viewing = self.view.files.last().map(|f| f.path.clone());
+            self.preview = None;
         }
+        self.update_preview(ctx);
         self.update_waterfall(ctx);
         if self.downloading.as_ref().is_some_and(|h| h.is_finished())
             && let Some(h) = self.downloading.take()
@@ -1499,6 +1571,8 @@ fn main() -> eframe::Result {
                 images: HashMap::new(),
                 viewing: None,
                 files_seen: 0,
+                previewer: progressive::Previewer::new(),
+                preview: None,
                 id_text: String::new(),
                 tuning: false,
                 show_settings: false,
