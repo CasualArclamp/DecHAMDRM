@@ -10,6 +10,7 @@
 
 mod plots;
 mod prefs;
+mod rxcard;
 mod theme;
 mod transcode;
 
@@ -141,7 +142,9 @@ impl App {
             let mut v: Vec<f32> = row.iter().copied().filter(|d| d.is_finite()).collect();
             if !v.is_empty() {
                 v.sort_by(f32::total_cmp);
-                let floor = f64::from(v[v.len() / 5]);
+                // Not more than 40 dB under the strongest bin: a recording with digital
+                // silence around the signal would otherwise paint everything at full scale.
+                let floor = f64::from(v[v.len() / 5]).max(f64::from(v[v.len() - 1]) - 40.0);
                 self.wf_floor = if self.wf_floor < -200.0 {
                     floor
                 } else {
@@ -278,60 +281,16 @@ impl App {
     // ---------------------------------------------------------------- receiver
     fn receiver(&mut self, ui: &mut Ui) {
         let st = self.view.status.clone();
-        heading(ui, "Receiver");
-        ui.horizontal(|ui| {
-            let sig = st.dc_frequency_hz.is_some();
-            led(ui, "Signal", sig);
-            led(ui, "Mode", st.mode.is_some());
-            led(ui, "FAC", st.fac_ok > 0 && st.state != RxState::Acquisition);
-            led(ui, "MSC", st.msc.is_some() && st.state == RxState::Locked);
-        });
-        ui.add_space(4.0);
-        egui::Grid::new("rxfig")
-            .num_columns(2)
-            .spacing([10.0, 3.0])
-            .show(ui, |ui| {
-                let fmt = |v: Option<f64>, u: &str| {
-                    v.map_or("—".to_string(), |v| format!("{v:.1} {u}"))
-                };
-                row(
-                    ui,
-                    "Mode",
-                    st.msc.map_or_else(
-                        || st.mode.map_or("—".into(), |m| format!("{m}")),
-                        |m| m.to_string(),
-                    ),
-                );
-                row(
-                    ui,
-                    "Station",
-                    st.label.clone().unwrap_or_else(|| "—".into()),
-                );
-                row(ui, "SNR", fmt(st.snr_db, "dB"));
-                row(
-                    ui,
-                    "MER / WMER",
-                    format!("{} / {}", fmt(st.mer_db, ""), fmt(st.wmer_db, "dB")),
-                );
-                row(ui, "DC carrier", fmt(st.dc_frequency_hz, "Hz"));
-                row(
-                    ui,
-                    "Doppler / delay",
-                    format!("{:.2} Hz / {:.2} ms", st.doppler_hz, st.delay_ms),
-                );
-                row(ui, "Clock offset", format!("{:.1} Hz", st.sro_hz));
-                row(
-                    ui,
-                    "FAC ok / bad",
-                    format!("{} / {}", st.fac_ok, st.fac_bad),
-                );
-                row(
-                    ui,
-                    "MSC ok / doubtful",
-                    format!("{} / {}", st.msc_ok, st.msc_doubtful),
-                );
-                row(ui, "Packet CRC errors", self.view.crc_errors.to_string());
-            });
+        rxcard::show(
+            ui,
+            &st,
+            &rxcard::Extra {
+                cer: self.view.msc_cer,
+                crc_errors: self.view.crc_errors,
+                voice: self.view.voice.as_ref().map(|v| (v.good, v.bad)),
+                heard: st.label.as_deref(),
+            },
+        );
         ui.add_space(6.0);
         self.constellations(ui);
         if let Some(v) = &self.view.voice {
@@ -1297,20 +1256,6 @@ impl eframe::App for App {
 // ---------------------------------------------------------------- widgets
 fn heading(ui: &mut Ui, t: &str) {
     ui.label(RichText::new(t).strong().color(WHITE).size(14.0));
-}
-
-fn row(ui: &mut Ui, k: &str, v: String) {
-    ui.label(RichText::new(k).color(DIM));
-    ui.label(RichText::new(v).color(TEXT).monospace());
-    ui.end_row();
-}
-
-fn led(ui: &mut Ui, t: &str, on: bool) {
-    let (r, _) = ui.allocate_exact_size(vec2(10.0, 10.0), Sense::hover());
-    ui.painter()
-        .circle_filled(r.center(), 5.0, if on { GOOD } else { WELL_BAR });
-    ui.label(RichText::new(t).color(if on { TEXT } else { FAINT }));
-    ui.add_space(4.0);
 }
 
 fn pill(ui: &mut Ui, t: &str, c: Color32) {

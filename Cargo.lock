@@ -1428,6 +1428,7 @@ name = "hamdrm-gui"
 version = "0.1.0"
 dependencies = [
  "eframe",
+ "hamdrm-core",
  "hamdrm-engine",
  "image",
  "jpeg2k",

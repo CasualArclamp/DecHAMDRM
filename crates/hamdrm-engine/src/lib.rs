@@ -182,6 +182,9 @@ pub struct View {
     /// Station heard most recently (FAC label).
     pub heard: Option<String>,
     pub crc_errors: u64,
+    /// Cell error rate before FEC (0..1), smoothed over a few MSC frames: the cells
+    /// the Viterbi decoders had to correct, judged against the re-encoded result.
+    pub msc_cer: Option<f64>,
     /// File input finished.
     pub eof: bool,
     pub voice: Option<VoiceView>,
@@ -279,6 +282,7 @@ struct Worker {
     speaker: Option<OutputStream>,
     neural_failed: bool,
     unsupported_voice_logged: bool,
+    msc_cer: Option<f64>,
     quit: bool,
 }
 
@@ -308,6 +312,7 @@ impl Worker {
             speaker: None,
             neural_failed: false,
             unsupported_voice_logged: false,
+            msc_cer: None,
             quit: false,
             opts,
             view,
@@ -698,17 +703,25 @@ impl Worker {
                     v.active = false;
                 }
             }
-            ReceiverEvent::Msc(f) => match self.service {
-                Some((Service::Audio { coding, .. }, ext)) => {
-                    self.voice_frame(&f.bytes, coding, ext)
+            ReceiverEvent::Msc(f) => {
+                if f.complete {
+                    let c = f.cell_error_rate;
+                    self.msc_cer = Some(self.msc_cer.map_or(c, |a| a + 0.3 * (c - a)));
                 }
-                _ => {
-                    for fe in self.files.push(Some(&f.bytes)) {
-                        self.file_event(fe);
-                    }
-                }
-            },
+                self.msc_frame(&f.bytes);
+            }
             _ => {}
+        }
+    }
+
+    fn msc_frame(&mut self, bytes: &[u8]) {
+        match self.service {
+            Some((Service::Audio { coding, .. }, ext)) => self.voice_frame(bytes, coding, ext),
+            _ => {
+                for fe in self.files.push(Some(bytes)) {
+                    self.file_event(fe);
+                }
+            }
         }
     }
 
@@ -944,6 +957,9 @@ impl Worker {
         v.ptt = Some(self.ptt.status());
         v.heard.clone_from(&self.heard);
         v.crc_errors = self.files.crc_errors();
+        v.msc_cer = self
+            .msc_cer
+            .filter(|_| self.rx.status().state != RxState::Acquisition);
         v.voice.clone_from(&self.voice_view);
         v.neural_ready = neural_weights().is_some();
     }
