@@ -71,8 +71,15 @@ const CP_LOSS_SYMBOLS: usize = 8;
 const CP_LOSS_BAD_FACS: usize = 2;
 /// Good FACs before switching timing to impulse-response tracking.
 const DELAYED_TRACKING_FACS: usize = 2;
-/// Limit of the sample-rate offset correction, Hz (≈ 4000 ppm).
-const MAX_SRO_HZ: Real = 200.0;
+/// Limit of the sample-rate offset correction, Hz (2000 ppm; sound cards are within a
+/// few hundred).
+const MAX_SRO_HZ: Real = 96.0;
+/// Consecutive good FACs (while locked) before the sample-rate correction in use is
+/// remembered as trusted; resynchronisation and restarts go back to the trusted value.
+const SRO_TRUST_FACS: usize = 5;
+/// Consecutive bad FACs after a first good one (before lock) that send the receiver
+/// back to timing acquisition.
+const MAX_BAD_FACS_TRACKING: usize = 3;
 /// Pilot-slope SRO estimates above this fraction are applied during acquisition
 /// (DecDRM: only offsets the receiver cannot lock on by itself need it).
 const SRO_ACQ_THRESHOLD: Real = 600e-6;
@@ -311,6 +318,8 @@ pub struct Receiver {
     cp: TimingHealth,
     sro_reports: usize,
     sro_prev: Option<Real>,
+    /// Sample-rate correction last confirmed by a run of good FACs, Hz.
+    sro_good: Real,
     /// MSC decoder for the confirmed FAC configuration.
     msc: Option<MscDecoder>,
     /// A frame was skipped since the decoder's last frame (restart its deinterleaver).
@@ -354,6 +363,7 @@ impl Receiver {
             cp: TimingHealth::default(),
             sro_reports: 0,
             sro_prev: None,
+            sro_good: 0.0,
             msc: None,
             msc_gap: true,
             pending_cfg: None,
@@ -413,6 +423,7 @@ impl Receiver {
 
     /// Restart acquisition from scratch (e.g. after retuning).
     pub fn restart(&mut self) {
+        self.set_sro(self.sro_good);
         self.acq = Some(FreqAcquisition::new(self.cfg.dc_search));
         self.acq_power = None;
         self.loud_samples = 0;
@@ -602,7 +613,15 @@ impl Receiver {
             self.timesync.adjust(out.timing_adjust);
         }
         // Coarse SRO acquisition from the pilot slope, only while searching.
-        let mut sro_delta = out.sro_delta_hz;
+        // The clock loop follows the pilots; it is believed only while FACs decode.
+        // After dropouts (a sound card losing samples) it would otherwise integrate
+        // garbage, and a wrong sample rate moves the frequency pilots apart, so every
+        // later acquisition lands off centre.
+        let mut sro_delta = if self.state != RxState::Acquisition && self.bad_facs == 0 {
+            out.sro_delta_hz
+        } else {
+            0.0
+        };
         if self.state == RxState::Acquisition
             && let Some(eps) = out.sro_estimate
         {
@@ -788,6 +807,9 @@ impl Receiver {
             return;
         }
         self.good_facs += 1;
+        if self.state == RxState::Locked && self.good_facs >= SRO_TRUST_FACS {
+            self.sro_good = self.sro_hz;
+        }
         if self.good_facs >= 2 {
             self.state = RxState::Locked;
             if !self.delayed_done {
@@ -807,6 +829,13 @@ impl Receiver {
     fn on_bad_fac(&mut self) {
         self.good_facs = 0;
         self.bad_facs += 1;
+        if self.state == RxState::Tracking && self.bad_facs >= MAX_BAD_FACS_TRACKING {
+            // One FAC got through but nothing since: the timing or frame position is
+            // wrong. Without this the receiver sat here for as long as the signal lasted.
+            self.resync();
+            self.events.push(ReceiverEvent::Resynchronising);
+            return;
+        }
         if self.state != RxState::Locked {
             return;
         }
@@ -822,6 +851,7 @@ impl Receiver {
     /// Re-acquire symbol timing and frame sync after a timing jump, keeping the
     /// frequency, mode, sample-rate correction and MSC configuration.
     fn resync(&mut self) {
+        self.set_sro(self.sro_good);
         self.timesync.configure(self.mode);
         self.chain = None;
         self.state = RxState::Acquisition;

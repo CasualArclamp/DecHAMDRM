@@ -43,6 +43,7 @@ fn main() {
         true,
         TxSettings {
             call: "VOICE".into(),
+            msc: msc_from_arg(a.get(2).map(String::as_str)),
             ..Default::default()
         },
         kind,
@@ -74,4 +75,19 @@ fn main() {
         "rx voice: {voice:?}\nFAC ok {} MSC ok {}\nrx log: {log:?}\ntx log: {txlog:?}",
         st.fac_ok, st.msc_ok
     );
+}
+
+/// Third argument `a64long` selects mode A 2.5 kHz 64-QAM with the long interleaver
+/// (the densest mode, most sensitive to lost samples); default is mode B 16-QAM.
+fn msc_from_arg(arg: Option<&str>) -> hamdrm_core::params::MscConfig {
+    use hamdrm_core::params::{Bandwidth, Interleave, Layout, Mode, MscConfig, Qam};
+    match arg {
+        Some("a64long") => MscConfig {
+            layout: Layout::new(Mode::A, Bandwidth::Wide),
+            qam: Qam::Qam64,
+            protection: 0,
+            interleave: Interleave::Long,
+        },
+        _ => MscConfig::default_picture(),
+    }
 }

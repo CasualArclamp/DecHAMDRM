@@ -158,6 +158,24 @@ All our changes to EasyDRF are in `docs/interop/easydrf-harness.patch`.
   needs a recording). EasyPal's `.rsN` files are only verified against our own encoder
   and through EasyDRF's receiver.
 
+## Receiver robustness (2026-11-17)
+
+Seen live by Rory: after audio dropouts the receiver locked off centre (DC 344 Hz,
+clock correction at its ±200 Hz limit, FACs failing) and never recovered. Cause: the
+clock (sample-rate) loop kept integrating while FACs failed, the wrong value survived
+restarts, and a wrong sample rate moves the three frequency pilots apart, so each new
+acquisition landed on a neighbouring bin. Now:
+
+- the clock loop is applied only while FACs decode; a value is trusted after 5 good
+  FACs in lock, and resync/restart return to the trusted value; limit ±96 Hz (2000 ppm);
+- acquisition interpolates the DC frequency from the three pilot lines (was ±3.9 Hz,
+  now within about 0.1 Hz on clean signals);
+- a receiver with one good FAC and then only bad ones resyncs after 3 (it used to stay).
+
+Test `dropouts_keep_frequency_and_clock_centred`; trace tool
+`cargo run --release -p hamdrm-core --example rxtrace -- FILE.wav`; live:
+`--example voice_loop -- SPEECH.wav neural a64long`.
+
 ## Open items
 
 - A recording of a real EasyPal (or QSSTV) transmission for RX interop.

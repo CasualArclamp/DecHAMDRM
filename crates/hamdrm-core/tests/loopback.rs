@@ -490,3 +490,76 @@ fn awgn_threshold_sweep() {
         eprintln!("THRESHOLD {c}: {last_ok:?} dB");
     }
 }
+
+/// Sound-card dropouts (lost and inserted blocks of samples) must not walk the
+/// sample-rate correction or the carrier frequency off: a wrong sample rate moves the
+/// frequency pilots apart, and every later acquisition then lands off centre
+/// (seen live: DC at 344 Hz, clock correction at its limit, FACs failing).
+#[test]
+fn dropouts_keep_frequency_and_clock_centred() {
+    let cfg = MscConfig {
+        layout: Layout::new(Mode::A, Bandwidth::Wide),
+        qam: Qam::Qam64,
+        protection: 0,
+        interleave: Interleave::Short,
+    };
+    let mut rng = Rng::new(7);
+    let mut tx = Transmitter::new(TxConfig::new(cfg, "TEST1"));
+    let mut clean: Vec<f32> = vec![0.0; SAMPLE_RATE as usize / 2];
+    for _ in 0..150 {
+        let bytes = random_bytes(&mut rng, tx.frame_bytes());
+        tx.push_frame(&bytes, &mut clean);
+    }
+    // A dropout every 0.3–1.5 s for the first 40 s, then an undisturbed tail.
+    let fs = SAMPLE_RATE as usize;
+    let mut audio: Vec<f32> = Vec::new();
+    let mut i = 0;
+    let mut k = 0u32;
+    while i < clean.len() {
+        let pick = |n: u32, lo: usize, hi: usize| {
+            lo + (n.wrapping_mul(2_654_435_761) >> 8) as usize % (hi - lo)
+        };
+        let run = if i < 40 * fs {
+            pick(k, 3 * fs / 10, 3 * fs / 2)
+        } else {
+            clean.len()
+        };
+        let end = (i + run).min(clean.len());
+        audio.extend_from_slice(&clean[i..end]);
+        i = end;
+        let gap = pick(k + 1000, fs / 200, fs * 6 / 100);
+        if k.is_multiple_of(2) {
+            i += gap; // samples lost
+        } else {
+            audio.extend(std::iter::repeat_n(0.0, gap)); // silence inserted
+        }
+        k += 1;
+    }
+    audio.extend(std::iter::repeat_n(0.0, fs));
+
+    let mut rx = Receiver::new(ReceiverConfig::default());
+    let (mut worst_sro, mut worst_dc): (Real, Real) = (0.0, 0.0);
+    let mut tail_ok = 0;
+    for (ci, chunk) in audio.chunks(4800).enumerate() {
+        for ev in rx.push(chunk) {
+            if matches!(ev, ReceiverEvent::Fac { .. }) && ci * 4800 > 46 * fs {
+                tail_ok += 1;
+            }
+        }
+        let st = rx.status();
+        worst_sro = worst_sro.max(st.sro_hz.abs());
+        if let Some(dc) = st.dc_frequency_hz {
+            worst_dc = worst_dc.max((dc - 350.0).abs());
+        }
+    }
+    assert!(
+        worst_sro < 2.0,
+        "clock correction walked to {worst_sro:.2} Hz"
+    );
+    assert!(worst_dc < 9.0, "carrier walked {worst_dc:.2} Hz off");
+    // 150 frames = 60 s; from 46 s to the end ≈ 34 frames must decode again.
+    assert!(
+        tail_ok >= 28,
+        "only {tail_ok} good FACs after the dropouts stopped"
+    );
+}

@@ -60,7 +60,7 @@ impl Default for SearchWindow {
 /// Successful acquisition.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Acquisition {
-    /// Frequency of the DC carrier in the audio, Hz (bin-quantised, ±3.9 Hz).
+    /// Frequency of the DC carrier in the audio, Hz (interpolated from the pilots).
     pub dc_hz: Real,
     /// Detection metric (sum of normalised pilot powers).
     pub score: Real,
@@ -190,10 +190,29 @@ impl FreqAcquisition {
         }
         // Parseval: Σ|X|² = N·Σ|x·w|².
         let power = psd.iter().sum::<Real>() / (n as Real * self.window_energy);
-        best.map(|(d, score)| Acquisition {
-            dc_hz: d as Real * bin_hz,
-            score,
-            power,
+        best.map(|(d, score)| {
+            // Refine below the bin spacing from the three pilot lines themselves: a
+            // parabola through the log power of each pilot's peak bin and its two
+            // neighbours gives that pilot's offset, and the pilots are averaged
+            // weighted by their power. Without this the start is up to ±3.9 Hz off
+            // and the tracking loop has to pull the rest in.
+            let (mut num, mut den) = (0.0, 0.0);
+            for p in PILOT_BINS {
+                let i = d + p;
+                let (l, c, r) = (psd[i - 1].max(1e-300), psd[i].max(1e-300), psd[i + 1]);
+                let (l, c, r) = (l.ln(), c.ln(), r.max(1e-300).ln());
+                let curv = l - 2.0 * c + r;
+                if curv < 0.0 {
+                    num += norm[i] * (0.5 * (l - r) / curv).clamp(-0.5, 0.5);
+                    den += norm[i];
+                }
+            }
+            let frac = if den > 0.0 { num / den } else { 0.0 };
+            Acquisition {
+                dc_hz: (d as Real + frac) * bin_hz,
+                score,
+                power,
+            }
         })
     }
 }
