@@ -13,7 +13,7 @@ use hamdrm_engine::{RxState, RxStatus};
 /// SNR (in 2.5 kHz) at which 99 % of MSC frames decode over AWGN. Measured with
 /// `awgn_threshold_sweep` (`docs/DESIGN.md`, milestone 3) except 64-QAM protection 1,
 /// which is an estimate (`false`).
-fn needed_snr(c: &MscConfig) -> (f64, bool) {
+pub fn needed_snr(c: &MscConfig) -> (f64, bool) {
     let b = c.layout.mode == Mode::B;
     match (c.qam, c.protection) {
         (Qam::Qam4, _) => (6.0, b),

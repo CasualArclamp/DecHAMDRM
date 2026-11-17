@@ -82,8 +82,10 @@ jobs:
             echo
             echo "| File | What |"
             echo "|---|---|"
-            echo "| \`dechamdrm-gui.exe\` | HamDRM modem: send and receive pictures and files (EasyPal / EasyDRF / QSSTV compatible), waterfall ID, BSR repeat requests, PTT by CAT (IC-7300, FT-710, rigctld) or DTR/RTS |"
-            echo "| \`dechamdrm.exe\` | Command line: \`tx\` files to a WAV, \`rx\` a recording to files |"
+            echo "| \`dechamdrm-gui.exe\` | HamDRM modem: send and receive pictures and files (EasyPal / EasyDRF / QSSTV compatible), digital voice (EasyDRF LPC-10 and a neural codec), JPEG 2000 transcoder, waterfall ID, BSR repeat requests, PTT by CAT (IC-7300, FT-710, rigctld) or DTR/RTS |"
+            echo "| \`dechamdrm.exe\` | Command line: \`tx\` files to a WAV, \`rx\` a recording to files, \`voice\` a speech WAV to a transmission, \`models download\` for the neural voice weights |"
+            echo
+            echo "The neural voice codec needs its weights (385 MB, Kyutai Mimi, CC-BY-4.0), downloaded once from Settings or with \`dechamdrm models download\`; everything else works without them. Linux: build from source, see the README."
             echo
             echo "Windows SmartScreen may warn on first start because the file is unsigned (\"More info\", then \"Run anyway\")."
             echo

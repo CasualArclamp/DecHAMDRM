@@ -96,6 +96,12 @@ quality has only been checked by a spectral-distance measure, not by listening.
 - **Spectrum and waterfall** from a 16384-point FFT (2.9 Hz bins, a row every 50 ms),
   asked 2026-11-16 ("way higher"): single carriers and pilots are resolved.
 - Live voice loop test (silent, cables A and B): `--example voice_loop`.
+- **Receiver card** in DecSAT's DVB-S2 style (`rxcard.rs`, 2026-11-17): lock-coloured
+  title bar, constellation and protection with the link margin, SNR bar ticked at the
+  SNR the mode needs, then sync / channel / FAC / Viterbi MLC / packets with health dots.
+- **Channel tab restyled** (`chantab.rs`, 2026-11-17, "make it look better"): a row of
+  figures (SNR, weakest carrier, ripple, echo spread, Doppler), frequency axes in Hz,
+  filled curves, SNR bars coloured against the needed SNR, fading map with a scale.
 
 ## Interop testing
 
@@ -135,7 +141,7 @@ All our changes to EasyDRF are in `docs/interop/easydrf-harness.patch`.
 8. [~] Digital voice: neural (Mimi) and EasyDRF LPC-10 done, both directions against
    EasyDRF for LPC-10; Speex not done.
 9. [ ] Better-FEC modes (see above).
-10. [~] CI, release workflow, portable exes done; release not cut.
+10. [x] CI, release workflow, portable exes; v0.1.0 released 2026-11-17.
 
 ## Interop results
 

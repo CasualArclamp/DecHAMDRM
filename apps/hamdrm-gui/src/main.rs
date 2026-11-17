@@ -8,6 +8,7 @@
 //!
 //! `dechamdrm-gui [FILE.wav [--speed X]] [--out-dir DIR] [--screenshot OUT.png --after SECS]`
 
+mod chantab;
 mod plots;
 mod prefs;
 mod rxcard;
@@ -1232,9 +1233,15 @@ impl eframe::App for App {
                 });
                 match self.centre_tab {
                     CentreTab::Picture => self.viewer(ui, &ctx),
-                    CentreTab::Channel => plots::channel_tab(
+                    CentreTab::Channel => chantab::show(
                         ui,
                         &self.view.chain,
+                        &self.view.status,
+                        self.view
+                            .status
+                            .msc
+                            .as_ref()
+                            .map(|c| rxcard::needed_snr(c).0),
                         &mut self.fading_tex,
                         &self.palette,
                     ),
