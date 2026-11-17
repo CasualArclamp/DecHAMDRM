@@ -524,6 +524,12 @@ impl Worker {
                 speaker,
                 mic_gain,
             } => {
+                if mic != self.opts.mic {
+                    self.log(format!(
+                        "microphone: {}",
+                        mic.as_deref().unwrap_or("system default")
+                    ));
+                }
                 self.opts.mic = mic;
                 self.opts.speaker = speaker;
                 self.opts.mic_gain = mic_gain;

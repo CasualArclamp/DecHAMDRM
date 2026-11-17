@@ -994,6 +994,15 @@ impl App {
     fn settings_window(&mut self, ctx: &egui::Context) {
         let mut open = self.show_settings;
         let mut apply = false;
+        // Sound devices take effect as soon as they are picked; the rest on Apply or
+        // when the window closes.
+        let before = (
+            self.prefs.mic.clone(),
+            self.prefs.speaker.clone(),
+            self.prefs.mic_gain,
+            self.prefs.input.clone(),
+            self.prefs.output.clone(),
+        );
         egui::Window::new("Settings")
             .open(&mut open)
             .resizable(false)
@@ -1150,23 +1159,36 @@ impl App {
                     apply = true;
                 }
             });
+        // Closing the window with its X applies too (it used to drop the changes).
+        apply |= self.show_settings && !open;
         self.show_settings = open;
-        if apply {
+        let voice_changed = before.0 != self.prefs.mic
+            || before.1 != self.prefs.speaker
+            || before.2 != self.prefs.mic_gain;
+        let input_changed = before.3 != self.prefs.input;
+        let output_changed = before.4 != self.prefs.output;
+        if apply || input_changed {
             self.engine
                 .send(Command::SetInput(Input::Sound(none_if_empty(
                     &self.prefs.input,
                 ))));
+        }
+        if apply || output_changed {
             self.engine
                 .send(Command::SetOutput(none_if_empty(&self.prefs.output)));
+        }
+        if apply {
             self.engine.send(Command::SetPtt(self.prefs.ptt.clone()));
+        }
+        if apply || voice_changed {
             self.engine.send(Command::SetAudioDevices {
                 mic: none_if_empty(&self.prefs.mic),
                 speaker: none_if_empty(&self.prefs.speaker),
                 mic_gain: self.prefs.mic_gain,
             });
-            if self.save_prefs {
-                self.prefs.save();
-            }
+        }
+        if (apply || voice_changed || input_changed || output_changed) && self.save_prefs {
+            self.prefs.save();
         }
     }
 }
