@@ -6,7 +6,7 @@
 
 use anyhow::{Context, Result, bail};
 use clap::{Parser, Subcommand};
-use hamdrm_core::fac::{AudioCoding, EXT_NEURAL_VOICE, Service};
+use hamdrm_core::fac::{AudioCoding, EXT_NEURAL_VOICE, Service, ext_has};
 use hamdrm_core::params::{Bandwidth, Interleave, Layout, Mode, MscConfig, Qam, SAMPLE_RATE};
 use hamdrm_core::rx::{Receiver, ReceiverConfig, ReceiverEvent};
 use hamdrm_core::tx::{Transmitter, TxConfig};
@@ -132,6 +132,12 @@ fn parse_config(a: &ModemArgs) -> Result<MscConfig> {
     };
     if a.prot > 1 {
         bail!("protection level is 0 or 1");
+    }
+    if qam == Qam::Qam4 && a.prot == 0 {
+        eprintln!(
+            "note: 4-QAM with protection 0 is DecHAMDRM's own rate 1/2 (non-compliant); \
+             use --prot 1 for the HamDRM standard 3/5 that EasyPal, EasyDRF and QSSTV receive"
+        );
     }
     Ok(MscConfig {
         layout: Layout::new(mode, bandwidth),
@@ -259,7 +265,9 @@ fn rx(a: RxArgs) -> Result<()> {
                                 (AudioCoding::Lpc, _) => {
                                     Some(Box::new(hamdrm_voice::easydrf::EasyDrfLpc::new()))
                                 }
-                                (AudioCoding::Celp, EXT_NEURAL_VOICE) => Some(neural()?),
+                                (AudioCoding::Celp, e) if ext_has(e, EXT_NEURAL_VOICE) => {
+                                    Some(neural()?)
+                                }
                                 _ => {
                                     if !voice_warned {
                                         voice_warned = true;

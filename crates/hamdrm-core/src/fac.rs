@@ -74,6 +74,18 @@ pub struct Fac {
 
 /// FAC extension byte of DecHAMDRM neural voice ("NV1").
 pub const EXT_NEURAL_VOICE: u8 = 0xA1;
+/// FAC extension byte of DecHAMDRM's 4-QAM normal protection (rate 1/2 instead of
+/// the standard's single 3/5). Legacy receivers decode the FAC, fail the packet CRCs
+/// and ignore the MSC.
+pub const EXT_QAM4_HALF: u8 = 0xA2;
+/// The extension byte is `0xA0` plus flags, so both extensions can be on (`0xA3`).
+const EXT_MAGIC: u8 = 0xA0;
+
+/// Whether extension byte `ext` carries the flag of `which` ([`EXT_NEURAL_VOICE`] or
+/// [`EXT_QAM4_HALF`]).
+pub fn ext_has(ext: u8, which: u8) -> bool {
+    ext & 0xF0 == EXT_MAGIC && ext & which & 0x0F != 0
+}
 
 impl Fac {
     /// The MSC configuration this FAC describes (the robustness mode comes from the
@@ -82,7 +94,13 @@ impl Fac {
         MscConfig {
             layout: Layout::new(mode, self.bandwidth),
             qam: self.qam,
-            protection: self.protection,
+            // 4-QAM: the standard has one rate (3/5, our protection 1) and legacy
+            // transmitters set the protection bit freely; only our extension flag
+            // selects rate 1/2 (protection 0).
+            protection: match self.qam {
+                Qam::Qam4 => u8::from(!ext_has(self.ext, EXT_QAM4_HALF)),
+                _ => self.protection,
+            },
             interleave: self.interleave,
         }
     }

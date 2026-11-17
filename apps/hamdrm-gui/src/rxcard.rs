@@ -10,12 +10,18 @@ use hamdrm_core::mlc::MlcParams;
 use hamdrm_core::params::{Interleave, Mode, MscConfig, Qam};
 use hamdrm_engine::{RxState, RxStatus};
 
+/// 4-QAM rate 1/2 (ours): threshold in mode B 2.5 kHz, and whether it was measured.
+const QAM4_HALF_SNR: f64 = 5.0;
+const QAM4_HALF_MEASURED: bool = true;
+
 /// SNR (in 2.5 kHz) at which 99 % of MSC frames decode over AWGN. Measured with
 /// `awgn_threshold_sweep` (`docs/DESIGN.md`, milestone 3) except 64-QAM protection 1,
 /// which is an estimate (`false`).
 pub fn needed_snr(c: &MscConfig) -> (f64, bool) {
     let b = c.layout.mode == Mode::B;
     match (c.qam, c.protection) {
+        // 4-QAM low is the HamDRM standard code (3/5); normal is our rate 1/2.
+        (Qam::Qam4, 0) => (QAM4_HALF_SNR, QAM4_HALF_MEASURED && b),
         (Qam::Qam4, _) => (6.0, b),
         (Qam::Qam16, 0) => (if b { 10.0 } else { 9.5 }, true),
         (Qam::Qam16, _) => (11.5, b),

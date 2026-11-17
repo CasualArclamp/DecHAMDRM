@@ -439,6 +439,8 @@ These are identical to DecDRM `tables.rs:399-412`.
 
 - Only rows 0 and 1 of the DRM30 tables are reachable, because the FAC field is 1 bit.
   Rows 2 and 3 of `iCodRateCombMSC64SM` are unused.
+- **DecHAMDRM extension:** 4-QAM with rate 1/2 (idx 4) when FAC bits 32–39 are `0xA2`
+  or `0xA3` (our "4-QAM normal"); the standard 3/5 is our "4-QAM low". See DESIGN.md.
 - 4-QAM in the MSC is **HamDRM-only** (DRM30 has no MSC 4-QAM) **[c MLC.cpp:494-530]**.
 - **No partitioning**: N1 = 0, there is no higher protected part and no hierarchical
   mode or VSPP. All bits are "part B" **[c MLC.cpp:509, 554, 613; EnergyDispersal init

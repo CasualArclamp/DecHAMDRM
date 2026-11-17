@@ -15,6 +15,8 @@ with **EasyPal**, **EasyDRF** and **QSSTV**.
 **Pictures and files**
 - HamDRM modes A, B and E, 2.3 and 2.5 kHz, 4/16/64-QAM, both protection levels, short
   and long interleaver.
+- 4-QAM "low" is the HamDRM standard 4-QAM code; 4-QAM "normal" is DecHAMDRM's own
+  more robust rate 1/2 (marked non-compliant: only DecHAMDRM receives it).
 - Reed-Solomon file protection: EasyPal / QSSTV `.rs1`–`.rs4` (send and receive) and
   EasyDRF's own RS levels (receive).
 - BSR: ask for the missing segments of a file, and answer other stations' requests.

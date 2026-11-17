@@ -448,6 +448,7 @@ fn success(c: MscConfig, imp: &Impair, frames: usize) -> (Real, Outcome) {
 fn awgn_threshold_sweep() {
     let cases = [
         cfg(Mode::B, Bandwidth::Wide, Qam::Qam4, 0, Interleave::Short),
+        cfg(Mode::B, Bandwidth::Wide, Qam::Qam4, 1, Interleave::Short),
         cfg(Mode::B, Bandwidth::Wide, Qam::Qam16, 0, Interleave::Short),
         cfg(Mode::B, Bandwidth::Wide, Qam::Qam16, 1, Interleave::Short),
         cfg(Mode::B, Bandwidth::Wide, Qam::Qam64, 0, Interleave::Short),
@@ -562,4 +563,28 @@ fn dropouts_keep_frequency_and_clock_centred() {
         tail_ok >= 28,
         "only {tail_ok} good FACs after the dropouts stopped"
     );
+}
+
+/// 4-QAM normal protection is DecHAMDRM's own rate 1/2 (HamDRM has one 4-QAM code,
+/// 3/5, which is 4-QAM low here): fewer bytes per frame, flagged in the FAC, and
+/// both decoded by our receiver.
+#[test]
+fn qam4_normal_protection_is_our_rate_half() {
+    let normal = cfg(Mode::B, Bandwidth::Wide, Qam::Qam4, 0, Interleave::Short);
+    let low = cfg(Mode::B, Bandwidth::Wide, Qam::Qam4, 1, Interleave::Short);
+    let bytes = |c| Transmitter::new(TxConfig::new(c, "TEST1")).frame_bytes();
+    let (n, l) = (bytes(normal), bytes(low));
+    assert!(
+        n * 6 + 8 > l * 5 && n * 6 < l * 5 + 8,
+        "{n} and {l} bytes: not rates 1/2 and 3/5"
+    );
+    for c in [normal, low] {
+        let o = run(&[(c, 12)], &Impair::default());
+        assert!(
+            o.matched[0] >= 10,
+            "{c}: only {} of 12 frames",
+            o.matched[0]
+        );
+        assert_eq!(o.trusted_wrong, 0);
+    }
 }

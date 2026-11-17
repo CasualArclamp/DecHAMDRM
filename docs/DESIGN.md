@@ -128,7 +128,7 @@ All our changes to EasyDRF are in `docs/interop/easydrf-harness.patch`.
 2. [x] Core TX: file → MOT → MSC → OFDM WAV, byte-exact through EasyDRF's receiver.
 3. [x] Core RX: our TX loopback through the channel simulator (AWGN, HF fading).
    Measured AWGN thresholds (≥ 99 % of frames, SNR in 2.5 kHz, 0.5 dB steps, 2 × 60
-   frames, `awgn_threshold_sweep`): mode B 2.5 kHz 4-QAM 6.0 dB, 16-QAM p0 10.0 dB,
+   frames, `awgn_threshold_sweep`): mode B 2.5 kHz 4-QAM (3/5) 6.0 dB, 16-QAM p0 10.0 dB,
    16-QAM p1 11.5 dB, 64-QAM p0 15.0 dB; 16-QAM p0 in mode A 9.5 dB, mode E 9.5 dB.
 4. [x] RS erasure coding (EasyPal/QSSTV `.rsN` send+receive, EasyDRF receive) + BSR
    (request, parse, repair), LZMA `.lz`, file receiver with sanitised names.
@@ -163,6 +163,24 @@ All our changes to EasyDRF are in `docs/interop/easydrf-harness.patch`.
 - EasyPal itself and QSSTV → our RX: **not tested** (no transmitter of theirs here;
   needs a recording). EasyPal's `.rsN` files are only verified against our own encoder
   and through EasyDRF's receiver.
+
+## 4-QAM normal protection: our rate 1/2 (2026-11-17)
+
+HamDRM has a single 4-QAM code, rate 3/5, whatever the FAC protection bit says. Rory
+asked for the two 4-QAM settings to differ, selectable, with small yellow
+"non-compliant" text, and for the rates to be in line with 16/64-QAM (normal 1/2, low
+about 0.6). So:
+
+- **4-QAM low** = rate 3/5 = the HamDRM standard (what EasyPal/EasyDRF/QSSTV send and
+  receive, with either protection bit).
+- **4-QAM normal** = rate 1/2, DecHAMDRM only, flagged by FAC extension byte `0xA2`
+  (`fac::EXT_QAM4_HALF`; the byte is `0xA0` + flags, `0xA1` neural voice, `0xA3` both).
+  Legacy receivers decode the FAC, fail the packet CRCs and show nothing.
+- Measured (`awgn_threshold_sweep`, mode B 2.5 kHz): rate 1/2 5.0 dB, rate 3/5 6.0 dB;
+  65 against 78 bytes per frame.
+- Checked with EasyDRF: our 4-QAM low byte-exact, our 4-QAM normal ignored (no file, no
+  corrupt file); EasyDRF's 4-QAM with protection bit 0 and 1 both byte-exact here.
+- Note: `--qam 4` on the command line now needs `--prot 1` for the standard code.
 
 ## Receiver robustness (2026-11-17)
 

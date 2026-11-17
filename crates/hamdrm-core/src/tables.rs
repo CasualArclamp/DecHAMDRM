@@ -299,6 +299,11 @@ pub fn boosted_pilots(mode: Mode, bw: Bandwidth) -> [i32; 4] {
 }
 
 /// MSC code-rate indices per level, `[prot 0, prot 1]` (`TableMLC.h:449-464`).
-pub const MSC4_RATES: [usize; 1] = [6];
+/// 4-QAM: HamDRM has one rate, 3/5, whatever the protection bit says; here that is
+/// protection 1 ("low"), in line with 16- and 64-QAM whose low protection is about
+/// 0.6. Protection 0 ("normal") with rate 1/2, like theirs, is DecHAMDRM's own
+/// (non-compliant) mode, signalled by `fac::EXT_QAM4_HALF`; EasyPal, EasyDRF and
+/// QSSTV cannot receive it.
+pub const MSC4_RATES: [[usize; 1]; 2] = [[4], [6]];
 pub const MSC16_RATES: [[usize; 2]; 2] = [[2, 7], [4, 9]];
 pub const MSC64_RATES: [[usize; 3]; 2] = [[0, 4, 9], [2, 7, 10]];

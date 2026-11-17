@@ -509,6 +509,12 @@ impl App {
                 ui.horizontal(|ui| {
                     ui.selectable_value(&mut self.prefs.protection, 0, "normal");
                     ui.selectable_value(&mut self.prefs.protection, 1, "low");
+                    if self.prefs.qam == Qam::Qam4 && self.prefs.protection == 0 {
+                        ui.label(RichText::new("non-compliant").color(WARN).size(10.5))
+                            .on_hover_text(
+                                "HamDRM has a single 4-QAM code, rate 3/5: that is 4-QAM low                                  here. 4-QAM normal is DecHAMDRM's own rate 1/2 (as 16- and                                  64-QAM normal are): more robust, but EasyPal, EasyDRF and                                  QSSTV cannot receive it. Pick low to work with them.",
+                            );
+                    }
                     ui.checkbox(&mut self.prefs.long, "long interleave");
                 });
                 ui.end_row();

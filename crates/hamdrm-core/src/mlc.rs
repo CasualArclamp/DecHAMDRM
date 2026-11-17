@@ -52,7 +52,7 @@ impl MlcParams {
     pub fn msc(qam: Qam, protection: u8, n_mux: usize) -> Self {
         let p = usize::from(protection.min(1));
         let (rates, interleaver): (Vec<usize>, Vec<Option<usize>>) = match qam {
-            Qam::Qam4 => (MSC4_RATES.to_vec(), vec![Some(1)]),
+            Qam::Qam4 => (MSC4_RATES[p].to_vec(), vec![Some(1)]),
             Qam::Qam16 => (MSC16_RATES[p].to_vec(), vec![Some(0), Some(1)]),
             Qam::Qam64 => (MSC64_RATES[p].to_vec(), vec![None, Some(0), Some(1)]),
         };
@@ -316,7 +316,7 @@ mod tests {
         for (m, b, want) in table {
             let n = CellMap::new(Layout::new(m, b)).msc_cells_per_frame;
             let cfgs = [
-                (Qam::Qam4, 0),
+                (Qam::Qam4, 1), // the standard 4-QAM code is our protection 1
                 (Qam::Qam16, 0),
                 (Qam::Qam16, 1),
                 (Qam::Qam64, 0),

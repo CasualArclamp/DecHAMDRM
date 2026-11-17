@@ -8,7 +8,7 @@
 use crate::cellmap::CellMap;
 use crate::fac::{Fac, Service};
 use crate::mlc::{MlcEncoder, MlcParams};
-use crate::params::{FRAMES_PER_SUPERFRAME, MscConfig, SAMPLE_RATE};
+use crate::params::{FRAMES_PER_SUPERFRAME, MscConfig, Qam, SAMPLE_RATE};
 use crate::{Cplx, Real};
 use decdrm_core::dsp::fft::Fft;
 use decdrm_core::interleave::CellInterleaver;
@@ -125,7 +125,12 @@ impl Transmitter {
             protection: self.cfg.msc.protection,
             service: self.cfg.service,
             label: Fac::label_part(&self.cfg.label, self.frame),
-            ext: self.cfg.ext,
+            // Our own 4-QAM rate 1/2 is flagged so that legacy receivers ignore it.
+            ext: if self.cfg.msc.qam == Qam::Qam4 && self.cfg.msc.protection == 0 {
+                self.cfg.ext | crate::fac::EXT_QAM4_HALF
+            } else {
+                self.cfg.ext
+            },
         };
         let mut fac_cells = Vec::new();
         self.fac_enc.encode(&fac.encode(), &mut fac_cells);

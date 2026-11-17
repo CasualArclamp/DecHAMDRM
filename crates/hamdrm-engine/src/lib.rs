@@ -18,7 +18,7 @@ pub use tx::TxSettings;
 use decdsss_audio::{InputOptions, InputStream, OutputOptions, OutputStream};
 use decdsss_rig::Ptt;
 pub use hamdrm_core::Cplx;
-use hamdrm_core::fac::{AudioCoding, EXT_NEURAL_VOICE, Service};
+use hamdrm_core::fac::{AudioCoding, EXT_NEURAL_VOICE, Service, ext_has};
 use hamdrm_core::rx::{Receiver, ReceiverEvent};
 use hamdrm_data::receive::{FileEvent, FileReceiver};
 use hamdrm_voice::VoiceCodec;
@@ -834,7 +834,7 @@ impl Worker {
     fn voice_frame(&mut self, bytes: &[u8], coding: AudioCoding, ext: u8) {
         let key = match (coding, ext) {
             (AudioCoding::Lpc, _) => VoiceKey::Lpc10,
-            (AudioCoding::Celp, EXT_NEURAL_VOICE) => VoiceKey::Neural,
+            (AudioCoding::Celp, e) if ext_has(e, EXT_NEURAL_VOICE) => VoiceKey::Neural,
             _ => {
                 if !self.unsupported_voice_logged {
                     self.unsupported_voice_logged = true;
