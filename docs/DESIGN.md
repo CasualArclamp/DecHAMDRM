@@ -225,6 +225,30 @@ finished file takes over.
 Checked: unit tests on cut-off files, and the window on a 60 s WAV (8-layer and
 1-layer JPEG 2000) with screenshots at 15, 30 and 40 s.
 
+## Hybrid mode (2026-11-18)
+
+EasyPal / QSSTV hybrid: the sender uploads the picture to an FTP server and transmits
+only a pointer, an object named `de_...` (or `.de...`) of about 130 bytes holding the
+scrambled host, login, password and directory; the picture has the same name in
+`<directory>/HybridFiles1` on port 21. Found with a 2019 EasyPal recording (mode E,
+2.3 kHz, 4-QAM, long interleave), whose three pointers decode.
+
+- `hamdrm-data/src/hybrid.rs`: pointer format, after QSSTV `utils/hybridcrypt.cpp`.
+  Hosts with anything but letters, digits, dot and dash are refused, as are control
+  characters anywhere.
+- `hamdrm-engine/src/ftp.rs`: our own small FTP client (login, CWD, PASV, RETR) with
+  timeouts, a reply limit and an 8 MB file limit; the data connection goes to the
+  control connection's address, not the one the server announces; nothing is uploaded
+  (QSSTV's "notify" upload is deliberately left out).
+- Receive only, and off by default: the server is named by whoever is transmitting.
+  A pointer shows under Received with a Fetch button; Settings has "fetch without
+  asking". The pointer itself is never saved (it holds the sender's login) and the
+  password stays inside the engine.
+- Checked: unit tests (pointer round trip, FTP client against an in-process server),
+  and end to end in the window with `scripts/interop/ftpd.py` on 127.0.0.1 (fetch on:
+  picture byte-identical; fetch off: server not contacted). Not checked against a real
+  hybrid server, and sending hybrid is not implemented.
+
 ## Open items
 
 - A recording of a real EasyPal (or QSSTV) transmission for RX interop.

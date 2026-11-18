@@ -24,6 +24,7 @@ fn main() {
         out_dir: std::env::temp_dir(),
         rx: ReceiverConfig::default(),
         auto_bsr: false,
+        hybrid_fetch: false,
         mic: mic.map(str::to_string),
         speaker: Some(String::new()),
         mic_gain: 1.0,

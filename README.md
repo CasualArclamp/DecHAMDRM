@@ -23,6 +23,9 @@ with **EasyPal**, **EasyDRF** and **QSSTV**.
 - Progressive display: a JPEG 2000 or JPEG picture sent without Reed-Solomon shows
   while it arrives and sharpens as more comes in (the transcoder writes its files in
   quality layers for this).
+- EasyPal / QSSTV hybrid mode (receive): when a station sends only a pointer to a
+  picture on its FTP server, the pointer shows with a Fetch button; fetching without
+  asking can be switched on in Settings.
 - Picture → JPEG 2000 transcoder with a quality slider and a live preview of what the
   other station will see, with the file size and air time.
 

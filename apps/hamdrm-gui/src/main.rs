@@ -760,12 +760,60 @@ impl App {
         }
     }
 
+    /// Hybrid pointers whose picture has not been fetched (yet).
+    fn hybrids(&mut self, ui: &mut Ui) {
+        use hamdrm_engine::HybridState;
+        for h in self.view.hybrids.clone().iter().rev() {
+            if h.state == HybridState::Done {
+                continue;
+            }
+            ui.horizontal(|ui| {
+                ui.add_sized(
+                    [40.0, 40.0],
+                    egui::Label::new(RichText::new("hybrid").color(AMBER).size(11.0)),
+                );
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(&h.name).color(TEXT));
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "{}  picture is on {}",
+                                h.from.as_deref().unwrap_or(""),
+                                h.host
+                            ))
+                            .color(DIM)
+                            .size(11.0),
+                        );
+                        match &h.state {
+                            HybridState::Waiting => {
+                                if ui.small_button("Fetch").clicked() {
+                                    self.engine.send(Command::FetchHybrid(h.name.clone()));
+                                }
+                            }
+                            HybridState::Fetching => {
+                                ui.label(RichText::new("fetching…").color(AMBER).size(11.0));
+                            }
+                            HybridState::Failed(e) => {
+                                ui.label(RichText::new(e).color(WARN).size(11.0));
+                                if ui.small_button("Retry").clicked() {
+                                    self.engine.send(Command::FetchHybrid(h.name.clone()));
+                                }
+                            }
+                            HybridState::Done => {}
+                        }
+                    });
+                });
+            });
+        }
+    }
+
     fn gallery(&mut self, ui: &mut Ui, ctx: &egui::Context) {
         heading(ui, "Received");
         let files = self.view.files.clone();
-        if files.is_empty() {
+        if files.is_empty() && self.view.hybrids.is_empty() {
             ui.label(RichText::new("no files yet").color(FAINT));
         }
+        self.hybrids(ui);
         egui::ScrollArea::vertical()
             .id_salt("gallery")
             .max_height(260.0)
@@ -1184,6 +1232,17 @@ impl App {
                             "answer repeat requests for my files automatically",
                         );
                         ui.end_row();
+                        ui.label("Hybrid");
+                        ui.checkbox(
+                            &mut self.prefs.hybrid_fetch,
+                            "fetch hybrid pictures from the sender's FTP server without asking",
+                        )
+                        .on_hover_text(
+                            "EasyPal hybrid mode sends only a pointer over the air; the picture is \
+                             downloaded from a server the transmitting station names. Off: each \
+                             pointer gets a Fetch button.",
+                        );
+                        ui.end_row();
                         ui.label("Received files");
                         ui.label(self.prefs.out_dir.display().to_string());
                         ui.end_row();
@@ -1215,6 +1274,8 @@ impl App {
         }
         if apply {
             self.engine.send(Command::SetPtt(self.prefs.ptt.clone()));
+            self.engine
+                .send(Command::SetHybridFetch(self.prefs.hybrid_fetch));
         }
         if apply || voice_changed {
             self.engine.send(Command::SetAudioDevices {
@@ -1467,6 +1528,7 @@ fn main() -> eframe::Result {
     let mut jp2_arg: Option<PathBuf> = None;
     let mut jp2_quality: Option<u32> = None;
     let (mut tx_qam, mut tx_prot): (Option<String>, Option<u8>) = (None, None);
+    let mut hybrid_fetch = false;
     let (mut file, mut speed, mut out_dir, mut shot_path, mut after) =
         (None, 1.0, None, None, 10.0);
     while let Some(a) = args.next() {
@@ -1481,6 +1543,7 @@ fn main() -> eframe::Result {
             // Transmit settings for a screenshot (unattended runs use default settings).
             "--qam" => tx_qam = args.next(),
             "--prot" => tx_prot = args.next().and_then(|v| v.parse().ok()),
+            "--hybrid-fetch" => hybrid_fetch = true,
             _ => file = Some(PathBuf::from(a)),
         }
     }
@@ -1499,6 +1562,7 @@ fn main() -> eframe::Result {
         Some("64") => prefs.qam = Qam::Qam64,
         _ => {}
     }
+    prefs.hybrid_fetch |= hybrid_fetch;
     if let Some(p) = tx_prot {
         prefs.protection = p.min(1);
     }
@@ -1527,6 +1591,7 @@ fn main() -> eframe::Result {
         out_dir: prefs.out_dir.clone(),
         rx: ReceiverConfig::default(),
         auto_bsr: prefs.auto_bsr,
+        hybrid_fetch: prefs.hybrid_fetch,
         mic: none_if_empty(&prefs.mic),
         speaker: if unattended {
             Some(String::new())

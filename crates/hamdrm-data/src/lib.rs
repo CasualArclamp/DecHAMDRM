@@ -2,6 +2,7 @@
 //! BSR, compatible with EasyPal, EasyDRF and QSSTV (`docs/spec/app.md`).
 
 pub mod bsr;
+pub mod hybrid;
 pub mod mot;
 pub mod packet;
 pub mod receive;

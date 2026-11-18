@@ -614,7 +614,8 @@ Section 5; the last 32 bits of the byte-aligned block (`:505-511`).
 - QSSTV: `<rxDRMImagesPath>/<ContentName>`; RS: `completeBaseName + "." + ext3`
   (`Q:drmrx/sourcedecoder.cpp:664, 672-678`; `Q:utils/reedsolomoncoder.cpp:163-171`); `.txt`/`.chat`
   are shown as text (`:610-619`); names starting `de_` or `.de` are QSSTV "hybrid" objects
-  (the body holds encrypted FTP data; the picture is downloaded) (`:525-563`) — QSSTV-only.
+  (the body holds encrypted FTP data; the picture is downloaded) (`:525-563`). EasyPal sends these too (2019 recording); format and handling in
+  `hamdrm-data/src/hybrid.rs` and DESIGN.md "Hybrid mode".
 
 ---
 

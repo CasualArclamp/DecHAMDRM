@@ -20,6 +20,8 @@ pub struct Prefs {
     pub output: String,
     pub ptt: PttConfig,
     pub auto_bsr: bool,
+    /// Fetch hybrid pictures from the sender's FTP server without asking.
+    pub hybrid_fetch: bool,
     pub out_dir: PathBuf,
     pub mic: String,
     pub speaker: String,
@@ -47,6 +49,7 @@ impl Default for Prefs {
             // VOX: nothing is keyed until the user chooses a method.
             ptt: PttConfig::default(),
             auto_bsr: false,
+            hybrid_fetch: false,
             out_dir: default_out_dir(),
             mic: String::new(),
             speaker: String::new(),
@@ -111,6 +114,7 @@ impl Prefs {
         p.input = get("input").unwrap_or_default().into();
         p.output = get("output").unwrap_or_default().into();
         p.auto_bsr = get("auto_bsr") == Some("1");
+        p.hybrid_fetch = get("hybrid_fetch") == Some("1");
         if let Some(v) = get("out_dir").filter(|v| !v.is_empty()) {
             p.out_dir = PathBuf::from(v);
         }
@@ -162,6 +166,7 @@ impl Prefs {
         kv("input", self.input.clone());
         kv("output", self.output.clone());
         kv("auto_bsr", u8::from(self.auto_bsr).to_string());
+        kv("hybrid_fetch", u8::from(self.hybrid_fetch).to_string());
         kv("out_dir", self.out_dir.display().to_string());
         kv("mic", self.mic.clone());
         kv("speaker", self.speaker.clone());

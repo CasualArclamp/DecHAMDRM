@@ -315,6 +315,18 @@ fn rx(a: RxArgs) -> Result<()> {
                                     );
                                 }
                             }
+                            FileEvent::File { name, data, .. }
+                                if hamdrm_data::hybrid::is_hybrid_name(&name) =>
+                            {
+                                // Not saved: the pointer holds the sender's FTP login.
+                                match hamdrm_data::hybrid::HybridLink::decode(&data) {
+                                    Some(l) => eprintln!(
+                                        "hybrid pointer {name}: the picture is on FTP server {} (the window can fetch it)",
+                                        l.host
+                                    ),
+                                    None => eprintln!("hybrid pointer {name}: cannot be read"),
+                                }
+                            }
                             FileEvent::File { name, data, rs, .. } => {
                                 let path = a.out_dir.join(&name);
                                 std::fs::write(&path, &data)?;

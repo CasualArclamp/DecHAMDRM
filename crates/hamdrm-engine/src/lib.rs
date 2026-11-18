@@ -4,6 +4,7 @@
 //! The UI sends [`Command`]s and reads a [`View`] snapshot. HamDRM is half duplex:
 //! while transmitting the receiver is paused and restarted afterwards.
 
+mod ftp;
 mod tx;
 mod waterfall;
 
@@ -21,6 +22,7 @@ pub use hamdrm_core::Cplx;
 use hamdrm_core::fac::{AudioCoding, EXT_NEURAL_VOICE, Service, ext_has};
 use hamdrm_core::rx::{Receiver, ReceiverEvent};
 use hamdrm_data::bsr::BSR_NAME;
+use hamdrm_data::hybrid::{self, HybridLink};
 use hamdrm_data::receive::{FileEvent, FileReceiver};
 use hamdrm_data::rsfile;
 use hamdrm_voice::VoiceCodec;
@@ -69,6 +71,8 @@ pub struct Options {
     pub speaker: Option<String>,
     /// Microphone gain (linear).
     pub mic_gain: f32,
+    /// Fetch hybrid pictures from the sender's FTP server without asking.
+    pub hybrid_fetch: bool,
 }
 
 /// Which voice codec to transmit with.
@@ -92,6 +96,10 @@ pub struct VoiceView {
 /// What the UI can ask for.
 #[derive(Debug, Clone)]
 pub enum Command {
+    /// Fetch hybrid pictures without asking (on / off).
+    SetHybridFetch(bool),
+    /// Fetch the hybrid picture with this on-air name now.
+    FetchHybrid(String),
     SendFiles(Vec<PathBuf>, TxSettings),
     /// Ask the sender of object `tid` for its missing segments.
     SendBsr(u16, TxSettings),
@@ -143,6 +151,28 @@ pub struct RxFile {
     pub bytes: usize,
 }
 
+/// A hybrid pointer that arrived: the picture itself is on an FTP server.
+#[derive(Debug, Clone)]
+pub struct HybridSeen {
+    /// On-air name = name of the file on the server.
+    pub name: String,
+    pub host: String,
+    pub from: Option<String>,
+    pub state: HybridState,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HybridState {
+    /// Waiting for the user (automatic fetching is off).
+    Waiting,
+    Fetching,
+    Done,
+    Failed(String),
+}
+
+/// Largest hybrid picture accepted.
+const HYBRID_MAX_BYTES: usize = 8 << 20;
+
 /// A BSR that arrived, and whether it is about one of our files.
 #[derive(Debug, Clone)]
 pub struct BsrSeen {
@@ -179,6 +209,7 @@ pub struct View {
     pub objects: Vec<ObjectView>,
     pub files: Vec<RxFile>,
     pub bsrs: Vec<BsrSeen>,
+    pub hybrids: Vec<HybridSeen>,
     pub log: VecDeque<String>,
     pub tx: Option<TxView>,
     pub ptt: Option<PttStatus>,
@@ -261,6 +292,9 @@ struct Sent {
     tid: u16,
 }
 
+/// Name and outcome of a hybrid fetch.
+type HybridResult = (String, Result<Vec<u8>, String>);
+
 struct Worker {
     opts: Options,
     view: Arc<Mutex<View>>,
@@ -281,6 +315,10 @@ struct Worker {
     new_rows: Vec<Vec<f32>>,
     heard: Option<String>,
     rx_files: Vec<RxFile>,
+    /// Hybrid pointers seen, with where to fetch them (kept out of the view: the
+    /// link holds the sender's password).
+    hybrids: Vec<(HybridSeen, HybridLink)>,
+    hybrid_done: (Sender<HybridResult>, ChanRx<HybridResult>),
     bsrs: Vec<BsrSeen>,
     input_db: f64,
     last_settings: TxSettings,
@@ -313,6 +351,8 @@ impl Worker {
             new_rows: Vec::new(),
             heard: None,
             rx_files: Vec::new(),
+            hybrids: Vec::new(),
+            hybrid_done: channel(),
             bsrs: Vec::new(),
             input_db: -120.0,
             last_settings: TxSettings::default(),
@@ -447,6 +487,9 @@ impl Worker {
             while let Ok(c) = self.cmds.try_recv() {
                 self.command(c);
             }
+            while let Ok((name, result)) = self.hybrid_done.1.try_recv() {
+                self.hybrid_result(name, result);
+            }
             if self.job.is_some() {
                 self.transmit_step();
             } else {
@@ -465,6 +508,8 @@ impl Worker {
             self.last_settings = s.clone();
         }
         match c {
+            Command::SetHybridFetch(on) => self.opts.hybrid_fetch = on,
+            Command::FetchHybrid(name) => self.fetch_hybrid(&name),
             Command::SendFiles(paths, s) => {
                 let mut files = Vec::new();
                 for p in &paths {
@@ -735,9 +780,113 @@ impl Worker {
         }
     }
 
+    /// A hybrid pointer arrived. It is not saved (it holds the sender's FTP login).
+    fn hybrid_pointer(&mut self, name: String, data: &[u8]) {
+        let Some(link) = HybridLink::decode(data) else {
+            self.log(format!("hybrid pointer {name}: cannot be read"));
+            return;
+        };
+        if self.hybrids.iter().any(|(h, _)| h.name == name) {
+            return;
+        }
+        self.log(format!(
+            "hybrid pointer {name}: the picture is on {}{}",
+            link.host,
+            if self.opts.hybrid_fetch {
+                ""
+            } else {
+                " (not fetched: press Fetch, or allow it in Settings)"
+            }
+        ));
+        self.hybrids.push((
+            HybridSeen {
+                name: name.clone(),
+                host: link.host.clone(),
+                from: self.heard.clone(),
+                state: HybridState::Waiting,
+            },
+            link,
+        ));
+        if self.opts.hybrid_fetch {
+            self.fetch_hybrid(&name);
+        }
+    }
+
+    /// Start the FTP download of a hybrid picture on its own thread.
+    fn fetch_hybrid(&mut self, name: &str) {
+        let Some((seen, link)) = self.hybrids.iter_mut().find(|(h, _)| h.name == name) else {
+            return;
+        };
+        if seen.state == HybridState::Fetching || seen.state == HybridState::Done {
+            return;
+        }
+        seen.state = HybridState::Fetching;
+        let (link, name, done) = (link.clone(), name.to_string(), self.hybrid_done.0.clone());
+        self.log(format!("fetching {name} from {}", link.host));
+        let _ = std::thread::Builder::new()
+            .name("hybrid-fetch".into())
+            .spawn(move || {
+                let dir = if link.directory.is_empty() {
+                    hybrid::FILES_DIR.to_string()
+                } else {
+                    format!("{}/{}", link.directory, hybrid::FILES_DIR)
+                };
+                let result = ftp::fetch(&ftp::Request {
+                    host: &link.host,
+                    port: 21,
+                    login: &link.login,
+                    password: &link.password,
+                    directory: &dir,
+                    file: &name,
+                    max_bytes: HYBRID_MAX_BYTES,
+                });
+                let _ = done.send((name, result));
+            });
+    }
+
+    fn hybrid_result(&mut self, name: String, result: Result<Vec<u8>, String>) {
+        let from = self
+            .hybrids
+            .iter()
+            .find(|(h, _)| h.name == name)
+            .and_then(|(h, _)| h.from.clone());
+        let state = match result {
+            Ok(data) => {
+                let _ = std::fs::create_dir_all(&self.opts.out_dir);
+                let safe = hamdrm_data::receive::sanitise(&name);
+                let path = unique_path(&self.opts.out_dir, &safe);
+                match std::fs::write(&path, &data) {
+                    Ok(()) => {
+                        self.log(format!("fetched {safe} ({} bytes)", data.len()));
+                        self.rx_files.push(RxFile {
+                            path,
+                            name: safe,
+                            from,
+                            when: SystemTime::now(),
+                            rs: Some("hybrid".into()),
+                            bytes: data.len(),
+                        });
+                        HybridState::Done
+                    }
+                    Err(e) => HybridState::Failed(format!("saving: {e}")),
+                }
+            }
+            Err(e) => HybridState::Failed(e),
+        };
+        if let HybridState::Failed(e) = &state {
+            self.log(format!("hybrid picture {name}: {e}"));
+        }
+        if let Some((h, _)) = self.hybrids.iter_mut().find(|(h, _)| h.name == name) {
+            h.state = state;
+        }
+    }
+
     fn file_event(&mut self, fe: FileEvent) {
         match fe {
             FileEvent::Progress { .. } => {}
+            FileEvent::File { name, data, .. } if hybrid::is_hybrid_name(&name) => {
+                self.hybrid_pointer(name, &data);
+            }
             FileEvent::File { name, data, rs, .. } => {
                 let _ = std::fs::create_dir_all(&self.opts.out_dir);
                 let path = unique_path(&self.opts.out_dir, &name);
@@ -975,6 +1124,7 @@ impl Worker {
         v.objects = objects;
         v.files.clone_from(&self.rx_files);
         v.bsrs.clone_from(&self.bsrs);
+        v.hybrids = self.hybrids.iter().map(|(h, _)| h.clone()).collect();
         v.log.clone_from(&self.log);
         v.tx = self.job.as_ref().map(|j| TxView {
             what: j.label().to_string(),
